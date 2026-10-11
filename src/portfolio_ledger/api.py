@@ -1,0 +1,198 @@
+"""js_api exposed to the page. Every method returns {ok: true, ...} or {ok: false, error}."""
+
+from __future__ import annotations
+
+import logging
+import subprocess
+from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from .services import finance
+from .services.finance import FinanceError
+from .services.ledger import EntryError, Ledger
+
+log = logging.getLogger(__name__)
+
+
+def _call(fn: Callable[[], dict[str, Any] | None]) -> dict[str, Any]:
+    try:
+        return {"ok": True, **(fn() or {})}
+    except (EntryError, FinanceError) as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        log.exception("api call failed")
+        return {"ok": False, "error": f"發生錯誤：{e}"}
+
+
+class Api:
+    # pywebview exposes public attributes too; keep collaborators private.
+    def __init__(self, ledger: Ledger, refresh: Callable[[], None]) -> None:
+        self._ledger = ledger
+        self._refresh = refresh
+
+    def get_state(self) -> dict[str, Any]:
+        return _call(lambda: {"state": self._ledger.state()})
+
+    def preview(self, text: str, edit_id: int | None = None) -> dict[str, Any]:
+        return _call(lambda: {"preview": self._ledger.preview(text, edit_id)})
+
+    def commit(self, text: str, edit_id: int | None = None) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            tx_id = self._ledger.commit(text, edit_id)
+            return {"id": tx_id, "state": self._ledger.state()}
+
+        return _call(run)
+
+    def delete_tx(self, tx_id: int) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            self._ledger.delete(tx_id)
+            return {"state": self._ledger.state()}
+
+        return _call(run)
+
+    def tx_line(self, tx_id: int) -> dict[str, Any]:
+        return _call(lambda: {"line": self._ledger.tx_line(tx_id)})
+
+    def tx_fields(self, tx_id: int) -> dict[str, Any]:
+        return _call(lambda: {"fields": self._ledger.tx_fields(tx_id)})
+
+    def save_account(self, data: dict[str, Any]) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            acc_id = self._ledger.save_account(data)
+            self._refresh()  # a new currency needs its FX rate
+            return {"id": acc_id, "state": self._ledger.state()}
+
+        return _call(run)
+
+    def save_group(self, data: dict[str, Any]) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            self._ledger.save_group(data)
+            self._refresh()  # new currencies need FX rates
+            return {"state": self._ledger.state()}
+
+        return _call(run)
+
+    def delete_group(self, name: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            self._ledger.delete_group(name)
+            return {"state": self._ledger.state()}
+
+        return _call(run)
+
+    def delete_account(self, account_id: int) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            self._ledger.delete_account(account_id)
+            return {"state": self._ledger.state()}
+
+        return _call(run)
+
+    def save_settings(self, values: dict[str, str]) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            self._ledger.save_settings(values)
+            return {"state": self._ledger.state()}
+
+        return _call(run)
+
+    # ── 收支 ──
+
+    def get_month(self, month: str | None = None) -> dict[str, Any]:
+        return _call(lambda: {"month": finance.month_report(self._ledger, month)})
+
+    def set_budget(self, category_id: int, amount: str, month: str | None = None) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.set_budget(self._ledger, category_id, amount)
+            return {"month": finance.month_report(self._ledger, month)}
+
+        return _call(run)
+
+    def set_total_budget(self, amount: str, month: str | None = None) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.set_total_budget(self._ledger, amount)
+            return {"month": finance.month_report(self._ledger, month)}
+
+        return _call(run)
+
+    # ── 規劃 ──
+
+    def get_plan(self) -> dict[str, Any]:
+        return _call(lambda: {"plan": finance.plan(self._ledger)})
+
+    def save_plan(self, values: dict[str, Any]) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.save_plan(self._ledger, values)
+            return {"plan": finance.plan(self._ledger)}
+
+        return _call(run)
+
+    def save_targets(self, values: dict[str, Any]) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.save_targets(self._ledger, values)
+            return {"plan": finance.plan(self._ledger)}
+
+        return _call(run)
+
+    def save_goal(self, data: dict[str, Any]) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.save_goal(self._ledger, data)
+            return {"plan": finance.plan(self._ledger)}
+
+        return _call(run)
+
+    def delete_goal(self, goal_id: int) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.delete_goal(self._ledger, goal_id)
+            return {"plan": finance.plan(self._ledger)}
+
+        return _call(run)
+
+    def save_life_plan(self, data: dict[str, Any]) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.save_life_plan(self._ledger, data)
+            return {"plan": finance.plan(self._ledger)}
+
+        return _call(run)
+
+    def delete_life_plan(self, plan_id: int) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.delete_life_plan(self._ledger, plan_id)
+            return {"plan": finance.plan(self._ledger)}
+
+        return _call(run)
+
+    # ── 健檢 ──
+
+    def get_advice(self) -> dict[str, Any]:
+        return _call(lambda: {"advice": finance.advice(self._ledger)})
+
+    def save_advice_thresholds(self, values: dict[str, Any]) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.save_advice_thresholds(self._ledger, values)
+            return {"advice": finance.advice(self._ledger)}
+
+        return _call(run)
+
+    def backtest(self, symbol: str, start: str, amount: str) -> dict[str, Any]:
+        return _call(lambda: {"result": finance.backtest(self._ledger, symbol, start, amount)})
+
+    def refresh(self) -> dict[str, Any]:
+        return _call(lambda: self._refresh())
+
+    def export_csv(self) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            dest = Path.home() / "Downloads" / f"Portfolio-Ledger-交易-{datetime.now():%Y%m%d-%H%M}.csv"
+            self._ledger.export_csv(dest)
+            subprocess.run(["open", "-R", str(dest)], check=False)
+            return {"path": str(dest)}
+
+        return _call(run)
+
+    def backup(self) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            dest = Path.home() / "Downloads" / f"Portfolio-Ledger-備份-{datetime.now():%Y%m%d-%H%M}.db"
+            self._ledger.db.backup_to(dest)
+            subprocess.run(["open", "-R", str(dest)], check=False)
+            return {"path": str(dest)}
+
+        return _call(run)
