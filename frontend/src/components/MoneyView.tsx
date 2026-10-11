@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { api } from '../api';
-import { Money } from '../lib/privacy';
+import { Money, PrivacyContext } from '../lib/privacy';
 import type { MonthReport, State } from '../types';
 import { TxList } from './Activity';
 import { PairBars } from './Charts';
@@ -8,6 +8,7 @@ import { PairBars } from './Charts';
 const FLOW_KINDS = ['income', 'expense', 'transfer'];
 
 export function MoneyView({ state, onEdit }: { state: State; onEdit(id: number): void }) {
+  const hidden = useContext(PrivacyContext);
   const [month, setMonth] = useState<string | null>(null);
   const [report, setReport] = useState<MonthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +32,8 @@ export function MoneyView({ state, onEdit }: { state: State; onEdit(id: number):
   if (!report) return null;
   const m = report;
   const rows = state.transactions.filter(t => t.date.startsWith(m.month) && FLOW_KINDS.includes(t.kind));
-  const cats = m.categories.filter(c => c.spent !== '0' || c.budget);
+  // A month still to come lists every category, so budgets can be set ahead.
+  const cats = m.is_future ? m.categories : m.categories.filter(c => c.spent !== '0' || c.budget);
   const unused = m.categories.filter(c => c.spent === '0' && !c.budget).map(c => c.name);
 
   async function saveTotal(v: string) {
@@ -53,16 +55,16 @@ export function MoneyView({ state, onEdit }: { state: State; onEdit(id: number):
         <button type="button" className="quiet" onClick={() => setMonth(m.prev)} aria-label="更早">
           ‹
         </button>
-        {m.trend.map(t => (
+        {m.tabs.map(t => (
           <button
             key={t.month}
             type="button"
-            className={t.month === m.month ? 'on' : ''}
+            className={`${t.month === m.month ? 'on' : ''} ${t.future ? 'future' : ''}`}
             aria-current={t.month === m.month ? 'true' : undefined}
             onClick={() => setMonth(t.month === thisMonth ? null : t.month)}
           >
             <span>{t.month.slice(0, 4) !== thisMonth.slice(0, 4) ? `${t.month.slice(0, 4)} 年 ` : ''}{t.label}</span>
-            <Money className="num tiny" value={t.expense_s} />
+            {t.future ? <span className="tiny">還沒到</span> : <Money className="num tiny" value={t.expense_s} />}
           </button>
         ))}
         {m.next && (
@@ -74,10 +76,10 @@ export function MoneyView({ state, onEdit }: { state: State; onEdit(id: number):
       <section className="card hero span-7" aria-label="本月支出">
         <div className="hero-top">
           <div>
-            <p className="label">{m.is_current ? '這個月花了' : `${m.label}花了`}</p>
+            <p className="label">{m.is_future ? `${m.label}的預算` : m.is_current ? '這個月花了' : `${m.label}花了`}</p>
             <h1 className="hero-num">
               <span className="ccy">NT$</span>
-              <Money value={m.expense} />
+              <Money value={m.is_future ? (m.budget ?? '—') : m.expense} />
             </h1>
           </div>
         </div>
@@ -86,7 +88,9 @@ export function MoneyView({ state, onEdit }: { state: State; onEdit(id: number):
           <span style={{ width: `${Math.min(ratio, 1) * 100}%` }} />
         </div>
         <p className="budget-text">
-          {m.budget ? (
+          {m.is_future ? (
+            <span className="muted">{m.budget ? '還沒到這個月。' : '還沒設定每月預算。'}預算是每個月共用的，改了每個月都會一起變。</span>
+          ) : m.budget ? (
             m.over ? (
               <span className="warn">
                 預算 <Money value={m.budget} />，已超出 <Money value={m.budget_left?.replace('−', '')} />
@@ -139,7 +143,7 @@ export function MoneyView({ state, onEdit }: { state: State; onEdit(id: number):
           </header>
           <PairBars
             names={['收入', '支出']}
-            selected={m.trend.length - 1}
+            selected={m.trend.findIndex(t => t.month === m.month)}
             onPick={i => {
               const picked = m.trend[i].month;
               setMonth(picked === thisMonth ? null : picked);
@@ -154,11 +158,15 @@ export function MoneyView({ state, onEdit }: { state: State; onEdit(id: number):
       {!m.has_data && (
         <section className="card first span-12">
           <header className="card-head">
-            <h2>{m.is_current ? '這個月還沒有收支' : '這個月沒有收支紀錄'}</h2>
+            <h2>{m.is_future ? `${m.label}還沒到` : m.is_current ? '這個月還沒有收支' : '這個月沒有收支紀錄'}</h2>
           </header>
+          {m.is_future ? (
+            <p>可以先在上面設定每月總預算，或在「支出分類」給各分類設定預算。到了這個月再記帳。</p>
+          ) : (
           <p>
             在上方輸入 <code>支出 120 午餐</code>、<code>收入 60000 薪資</code>；信用卡刷卡記在信用卡帳戶：<code>支出 1200 購物 @信用卡</code>。
           </p>
+          )}
         </section>
       )}
 
@@ -181,7 +189,7 @@ export function MoneyView({ state, onEdit }: { state: State; onEdit(id: number):
                 <div key={c.id} className="trow">
                   <span className="cell">
                     <span className="ellipsis">{c.name}</span>
-                    <span className="sub">佔本月 {Math.round(c.share * 100)}%</span>
+                    {!m.is_future && <span className="sub">佔本月 {Math.round(c.share * 100)}%</span>}
                   </span>
                   <span className="cell r">
                     <Money className="num" value={c.spent} />
@@ -195,10 +203,10 @@ export function MoneyView({ state, onEdit }: { state: State; onEdit(id: number):
                         <span className={`num small ${r > 1 ? 'warn' : ''}`}>{Math.round(r * 100)}%</span>
                       </>
                     )}
-                    <InlineAmount label={c.budget ? c.budget : '設定'} value={c.budget_raw} onSave={v => saveCategory(c.id, v)} />
+                    <InlineAmount label={c.budget ? (hidden ? '••••' : c.budget) : '設定'} value={c.budget_raw} onSave={v => saveCategory(c.id, v)} />
                   </span>
                   <span className="cell r hide-sm">
-                    {c.delta && c.delta_sign !== 0 ? <Money className="num small" value={c.delta} /> : <span className="muted small">—</span>}
+                    {!m.is_future && c.delta && c.delta_sign !== 0 ? <Money className="num small" value={c.delta} /> : <span className="muted small">—</span>}
                   </span>
                 </div>
               );

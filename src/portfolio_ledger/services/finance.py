@@ -63,6 +63,11 @@ def month_report(lg: Ledger, month: str | None = None) -> dict[str, Any]:
     month = month or this_month
     if len(month) != 7 or month[4] != "-":
         raise FinanceError("月份格式要是 YYYY-MM")
+    # Future months can be opened (to look ahead and set budgets) up to December, or next month in December.
+    latest = max(f"{today.year}-12", shift_month(this_month, 1))
+    if month > latest:
+        raise FinanceError(f"最遠只能看到 {latest[:4]} 年 {int(latest[5:])} 月")
+    future = month > this_month
     flows = _flows(repo.list_txs(lg.db))
     income, expense = _sum(flows, month, "income"), _sum(flows, month, "expense")
     net = income - expense
@@ -105,25 +110,34 @@ def month_report(lg: Ledger, month: str | None = None) -> dict[str, Any]:
     total_setting = repo.get_setting(lg.db, "budget_total", "")
     budget = Decimal(total_setting) if total_setting else sum((c.budget for c in cats if c.budget), ZERO) or None
     days_left = None
-    if month == this_month:
+    if future:
+        pass  # nothing spent yet; the whole budget is left
+    elif month == this_month:
         days_left = calendar.monthrange(today.year, today.month)[1] - today.day + 1
     left = budget - expense if budget else None
 
-    trend = []
-    for i in range(5, -1, -1):
-        m = shift_month(month, -i)
+    def point(m: str) -> dict[str, Any]:
         inc, exp = _sum(flows, m, "income"), _sum(flows, m, "expense")
-        trend.append(
-            {"month": m, "label": f"{int(m[5:])} 月", "income": float(inc), "expense": float(exp),
-             "income_s": fmt.money(inc), "expense_s": fmt.money(exp)}
-        )  # fmt: skip
+        return {"month": m, "label": f"{int(m[5:])} 月", "income": float(inc), "expense": float(exp),
+                "income_s": fmt.money(inc), "expense_s": fmt.money(exp), "future": m > this_month}  # fmt: skip
+
+    # The chart never runs into the future; the tabs add the months still to come this year.
+    anchor = min(month, this_month)
+    trend = [point(shift_month(anchor, -i)) for i in range(5, -1, -1)]
+    tabs = list(trend)
+    if anchor == this_month:
+        m = shift_month(this_month, 1)
+        while m <= latest:
+            tabs.append(point(m))
+            m = shift_month(m, 1)
 
     return {
         "month": month,
         "label": f"{month[:4]} 年 {int(month[5:])} 月",
         "prev": prev,
-        "next": shift_month(month, 1) if month < this_month else None,
+        "next": shift_month(month, 1) if month < latest else None,
         "is_current": month == this_month,
+        "is_future": future,
         "income": fmt.money(income),
         "expense": fmt.money(expense),
         "net": fmt.money(net, signed=True),
@@ -139,6 +153,7 @@ def month_report(lg: Ledger, month: str | None = None) -> dict[str, Any]:
         "categories": rows,
         "income_categories": income_rows,
         "trend": trend,
+        "tabs": tabs,
         "has_data": bool(income or expense),
     }
 

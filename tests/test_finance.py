@@ -95,7 +95,7 @@ def test_month_report_and_budgets(lg):
     rows = {r["name"]: r for r in m["categories"]}
     assert rows["餐飲"]["budget_ratio"] == pytest.approx(0.4)
     assert rows["交通"]["last"] == "1,000" and rows["交通"]["delta"] == "−200"
-    assert m["trend"][-1]["expense"] == 2800 and m["next"] is None
+    assert m["trend"][-1]["expense"] == 2800 and m["next"] == "2026-11"
     finance.set_total_budget(lg, "3000")
     assert finance.month_report(lg, "2026-10")["budget"] == "3,000"
 
@@ -281,3 +281,18 @@ def test_claimed_accounts_leave_the_shared_pool(lg):
     finance.save_life_plan(lg, {"kind": "other", "name": "旅行", "price": "50000"})
     rows = {p["name"]: p for p in finance.plan(lg)["life_plans"]}
     assert rows["車"]["saved"] == "100,000" and rows["旅行"]["saved"] == "0"
+
+
+def test_future_months_until_december(lg):
+    finance.set_total_budget(lg, "30000")
+    now = finance.month_report(lg)
+    assert now["next"] == "2026-11" and [t["month"] for t in now["tabs"]][-3:] == ["2026-10", "2026-11", "2026-12"]
+    assert now["tabs"][-1]["future"] and len(now["trend"]) == 6 and now["trend"][-1]["month"] == "2026-10"
+    nov = finance.month_report(lg, "2026-11")
+    assert nov["is_future"] and nov["budget_left"] == "30,000" and nov["days_left"] is None
+    assert nov["trend"][-1]["month"] == "2026-10"  # the chart stops at this month
+    assert finance.month_report(lg, "2026-12")["next"] is None
+    with pytest.raises(finance.FinanceError):
+        finance.month_report(lg, "2027-01")
+    past = finance.month_report(lg, "2026-08")
+    assert past["tabs"] == past["trend"] and not past["is_future"]

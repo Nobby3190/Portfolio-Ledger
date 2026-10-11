@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { api, type GoalInput } from '../api';
-import { Money, signClass } from '../lib/privacy';
+import { Money, PrivacyContext, signClass } from '../lib/privacy';
 import type { BacktestResult, Plan, PlanParams, State } from '../types';
 import { LineChart } from './Charts';
 import { LifePlans } from './LifePlans';
@@ -276,6 +276,7 @@ const FIRE_FIELDS: { key: keyof PlanParams; label: string; unit: string; auto?: 
 ];
 
 function Fire({ plan, onPlan }: { plan: Plan; onPlan: Take }) {
+  const hidden = useContext(PrivacyContext);
   const f = plan.fire;
   const [params, setParams] = useState<PlanParams>(f.params);
   useEffect(() => setParams(f.params), [f.params]);
@@ -301,23 +302,29 @@ function Fire({ plan, onPlan }: { plan: Plan; onPlan: Take }) {
           void save();
         }}
       >
-        {FIRE_FIELDS.map(fd => (
-          <label key={fd.key}>
-            <span className="muted small">{fd.label}</span>
-            <span className="unit-input">
-              <input
-                className="num"
-                inputMode="decimal"
-                value={params[fd.key]}
-                placeholder={fd.auto ? Number(f.auto[fd.auto]).toLocaleString('en-US') : ''}
-                onChange={e => setParams({ ...params, [fd.key]: e.target.value })}
-                onBlur={save}
-              />
-              <span className="muted">{fd.unit}</span>
-            </span>
-            {fd.auto && params[fd.key] === '' && <span className="muted tiny">自動：{autoNote(fd.auto, f.months_of_data)}</span>}
-          </label>
-        ))}
+        {FIRE_FIELDS.map(fd => {
+          // The money fields (the ones with an automatic value) are masked and locked in privacy mode.
+          const masked = hidden && fd.auto != null;
+          return (
+            <label key={fd.key}>
+              <span className="muted small">{fd.label}</span>
+              <span className="unit-input">
+                <input
+                  className="num"
+                  inputMode="decimal"
+                  value={masked ? (params[fd.key] ? '••••' : '') : params[fd.key]}
+                  placeholder={masked ? '••••' : fd.auto ? Number(f.auto[fd.auto]).toLocaleString('en-US') : ''}
+                  readOnly={masked}
+                  title={masked ? '隱藏金額中，關掉後才能修改' : undefined}
+                  onChange={e => setParams({ ...params, [fd.key]: e.target.value })}
+                  onBlur={masked ? undefined : save}
+                />
+                <span className="muted">{fd.unit}</span>
+              </span>
+              {fd.auto && params[fd.key] === '' && <span className="muted tiny">自動：{autoNote(fd.auto, f.months_of_data)}</span>}
+            </label>
+          );
+        })}
       </form>
 
       {!f.ready ? (

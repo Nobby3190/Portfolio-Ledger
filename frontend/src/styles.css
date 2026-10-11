@@ -1956,3 +1956,9 @@ button.trow:hover {
     display: none;
   }
 }
+
+/* months still to come: dashed, quieter until picked */
+.month-tabs > button.future:not(.on) {
+  border-style: dashed;
+  background: transparent;
+}

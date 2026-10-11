@@ -212,8 +212,20 @@ export interface MonthReport {
     delta_sign: Sign;
   }[];
   income_categories: { name: string; amount: string }[];
-  trend: { month: string; label: string; income: number; expense: number; income_s: string; expense_s: string }[];
+  trend: MonthPoint[]; // 6 months ending at this month at the latest (the chart)
+  tabs: MonthPoint[]; // the trend, plus the months still to come this year when it ends at this month
+  is_future: boolean;
   has_data: boolean;
+}
+
+export interface MonthPoint {
+  month: string;
+  label: string;
+  income: number;
+  expense: number;
+  income_s: string;
+  expense_s: string;
+  future: boolean;
 }
 
 export interface Goal {
