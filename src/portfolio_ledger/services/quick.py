@@ -23,10 +23,13 @@ ACTIONS = {
     "支出": "expense", "花": "expense", "expense": "expense", "exp": "expense",
     "收入": "income", "income": "income",
     "轉": "transfer", "轉帳": "transfer", "transfer": "transfer", "tf": "transfer",
+    "還": "repay", "還款": "repay", "repay": "repay",
+    "定額": "dca", "定期定額": "dca", "dca": "dca",
 }  # fmt: skip
 # Chinese keywords may be glued to what follows ("買2330"); longest first so 買進 beats 買.
 _GLUED = sorted((k for k in ACTIONS if not k.isascii()), key=len, reverse=True)
-_OVERRIDES = {"費": "fee", "fee": "fee", "稅": "tax", "tax": "tax", "匯": "fx", "fx": "fx", "總": "total", "total": "total"}
+_OVERRIDES = {"費": "fee", "fee": "fee", "稅": "tax", "tax": "tax", "匯": "fx", "fx": "fx", "總": "total", "total": "total",
+              "利": "interest", "interest": "interest"}  # fmt: skip
 
 # Positional fields each action needs, in order.
 FIELDS = {
@@ -41,6 +44,8 @@ FIELDS = {
     "income": ("amount",),  # plus an optional category, in any order (see _cash_flow)
     "expense": ("amount",),
     "transfer": ("amount",),
+    "repay": (),  # the amount is optional: the loan's scheduled payment (see _repay)
+    "dca": ("symbol", "amount"),  # 定期定額: a fixed amount, bought at that day's close
 }
 FIELD_NAMES = {"symbol": "代號", "qty": "股數", "price": "價格", "amount": "金額"}
 CATEGORY_KINDS = ("income", "expense")
@@ -69,6 +74,8 @@ class Command:
     tax: Decimal | None = None
     fx: Decimal | None = None
     total: Decimal | None = None  # 補登: the broker app's total cost (account currency, fees included)
+    interest: Decimal | None = None  # 還: the bank's interest when it differs from balance × rate ÷ 12
+    opening: bool = False  # 存 … 期初: the amount is the account's balance on that date
     note: str = ""
     missing: tuple[str, ...] = ()  # positional fields not typed yet
 
@@ -139,7 +146,7 @@ def parse(text: str, today: Date) -> Command:
     if action is None:
         if len(toks) == 1:
             return Command("lookup", symbol=toks[0])
-        raise ParseError(f"看不懂「{toks[0]}」：開頭要是 買、賣、補、息、配股、拆、存、提、支出、收入、轉")
+        raise ParseError(f"看不懂「{toks[0]}」：開頭要是 買、賣、補、息、配股、拆、存、提、支出、收入、轉、還、定額")
 
     cmd = Command(action, note=note)
     positional: list[str] = []
@@ -153,10 +160,12 @@ def parse(text: str, today: Date) -> Command:
                 raise ParseError("@ 後面要接帳戶名稱")
             if cmd.account is None:
                 cmd.account = tok[1:]
-            elif action == "transfer" and cmd.to_account is None:
+            elif action in ("transfer", "repay") and cmd.to_account is None:
                 cmd.to_account = tok[1:]
             else:
-                raise ParseError("帳戶寫太多個了" if action == "transfer" else "只能指定一個帳戶")
+                raise ParseError("帳戶寫太多個了" if action in ("transfer", "repay") else "只能指定一個帳戶")
+        elif low in ("期初", "opening") and action == "deposit":
+            cmd.opening = True
         elif (d := parse_date(tok, today)) is not None:
             cmd.date = d
         elif low in _OVERRIDES:
@@ -164,7 +173,7 @@ def parse(text: str, today: Date) -> Command:
                 raise ParseError(f"「{tok}」後面要接數字")
             setattr(cmd, _OVERRIDES[low], number(rest[i + 1]))
             i += 1
-        elif tok[0] in "費稅匯總" and len(tok) > 1:
+        elif tok[0] in "費稅匯總利" and len(tok) > 1 and _is_number(tok[1:]):  # 費20; but 利息 is a category
             setattr(cmd, _OVERRIDES[tok[0]], number(tok[1:]))
         else:
             positional.append(tok)
@@ -172,6 +181,8 @@ def parse(text: str, today: Date) -> Command:
 
     if action in CATEGORY_KINDS:
         return _cash_flow(cmd, positional)
+    if action == "repay":
+        return _repay(cmd, positional)
     fields = FIELDS[action]
     if len(positional) > len(fields):
         extra = " ".join(positional[len(fields) :])
@@ -191,7 +202,7 @@ def parse(text: str, today: Date) -> Command:
                 raise ParseError("價格要大於 0")
         elif name == "amount":
             cmd.amount = number(tok)
-            if cmd.amount <= 0:
+            if cmd.amount <= 0 and not cmd.opening:  # an opening balance may be a debt (credit card)
                 raise ParseError("金額要大於 0")
     cmd.missing = fields[len(positional) :]
     return cmd
@@ -218,6 +229,27 @@ def _cash_flow(cmd: Command, positional: list[str]) -> Command:
     return cmd
 
 
+def _is_number(tok: str) -> bool:
+    try:
+        number(tok)
+    except ParseError:
+        return False
+    return True
+
+
+def _repay(cmd: Command, positional: list[str]) -> Command:
+    """還: an optional amount (default: the scheduled payment); the loan and the payer are the two @s."""
+    if len(positional) > 1:
+        raise ParseError(f"多了「{' '.join(positional[1:])}」；說明請寫在 # 後面")
+    if positional:
+        cmd.amount = number(positional[0])
+        if cmd.amount <= 0:
+            raise ParseError("金額要大於 0")
+    if cmd.interest is not None and cmd.interest < 0:
+        raise ParseError("利息不能是負數")
+    return cmd
+
+
 def format_command(
     action: str,
     *,
@@ -233,16 +265,23 @@ def format_command(
     tax: Decimal | None = None,
     fx: Decimal | None = None,
     total: Decimal | None = None,
+    interest: Decimal | None = None,
+    opening: bool = False,
     note: str = "",
 ) -> str:
     """The inverse of parse(): the line a stored transaction is edited as."""
     word = {"buy": "買", "holding_in": "補", "sell": "賣", "cash_dividend": "息", "stock_dividend": "配股", "split": "拆",
-            "deposit": "存", "withdraw": "提", "income": "收入", "expense": "支出", "transfer": "轉"}[action]  # fmt: skip
+            "deposit": "存", "withdraw": "提", "income": "收入", "expense": "支出", "transfer": "轉",
+            "repay": "還", "dca": "定額"}[action]  # fmt: skip
     parts = [word]
     values = {"symbol": symbol, "qty": qty, "price": price, "amount": amount}
     for name in FIELDS[action]:
         v = values[name]
         parts.append(v if isinstance(v, str) else _plain(v))
+    if action == "repay" and amount is not None:
+        parts.append(_plain(amount))
+    if opening:
+        parts.append("期初")
     if category:
         parts.append(category)
     if date:
@@ -251,7 +290,7 @@ def format_command(
         parts.append(f"@{account}")
     if to_account:
         parts.append(f"@{to_account}")
-    for word, v in (("費", fee), ("稅", tax), ("匯", fx), ("總", total)):
+    for word, v in (("費", fee), ("稅", tax), ("匯", fx), ("總", total), ("利", interest)):
         if v is not None:
             parts.append(f"{word} {_plain(v)}")
     line = " ".join(parts)

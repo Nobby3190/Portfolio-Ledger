@@ -14,6 +14,7 @@ import webview
 from .api import Api
 from .db import APP_DIR, open_app_db
 from .poller import Poller
+from .services import recurring
 from .services.ledger import Ledger
 
 UI = Path(__file__).parent / "ui"  # built by `npm --prefix frontend run build`
@@ -53,6 +54,10 @@ def main() -> None:
     )
 
     ledger = Ledger(open_app_db())
+    try:
+        recurring.run_due(ledger)  # before the first page load; the poller repeats it on each new day
+    except Exception:
+        log.exception("recurring entries failed")
     windows: list[webview.Window] = []
     poller = Poller(ledger, Notifier(windows))
     api = Api(ledger, poller.refresh_now)

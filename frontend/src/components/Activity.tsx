@@ -4,7 +4,7 @@ import type { TxRow } from '../types';
 
 const PAGE = 30;
 // The 資產 view lists investing and money movement; income/expense live in 收支.
-const ASSET_KINDS = ['buy', 'holding_in', 'sell', 'cash_dividend', 'stock_dividend', 'split', 'deposit', 'withdraw', 'transfer'];
+const ASSET_KINDS = ['buy', 'holding_in', 'sell', 'cash_dividend', 'stock_dividend', 'split', 'deposit', 'withdraw', 'transfer', 'repay'];
 
 export function Activity({ transactions: all, onEdit, className = '', initial = PAGE }: { transactions: TxRow[]; onEdit(id: number): void; className?: string; initial?: number }) {
   const [limit, setLimit] = useState(initial);
@@ -58,6 +58,8 @@ export function TxLine({ t, onEdit }: { t: TxRow; onEdit(id: number): void }) {
   if (t.kind === 'transfer') {
     title = `轉帳 ${t.account} → ${t.to_account}`;
     if (t.received) sub.push(`轉入 ${t.received}`);
+  } else if (t.kind === 'repay') {
+    title = `還款 ${t.account} → ${t.to_account}`;
   } else if (t.kind === 'income' || t.kind === 'expense') {
     title = t.category ?? t.label;
     sub.push(t.account);
@@ -74,7 +76,14 @@ export function TxLine({ t, onEdit }: { t: TxRow; onEdit(id: number): void }) {
     <button type="button" className="trow" title="點一下修改" onClick={() => onEdit(t.id)}>
       <span className="date num">{t.date.slice(5).replace('-', '/')}</span>
       <span className="cell">
-        <span className="ellipsis">{title}</span>
+        <span className="ellipsis">
+          {title}
+          {t.recurring && (
+            <span className="rec-tag" title="週期性收支自動記入">
+              週期
+            </span>
+          )}
+        </span>
         {sub.length > 0 && <span className="sub ellipsis">{sub.join('　')}</span>}
       </span>
       <span className="cell r">

@@ -12,6 +12,7 @@ ACCOUNT_TYPES = {
     "cash": "現金",
     "credit": "信用卡",
     "deposit": "定存",
+    "loan": "貸款",
 }
 # Where income and expenses go when the line names no account.
 SPENDING_TYPES = ("bank", "cash", "credit")
@@ -27,6 +28,7 @@ TX_KINDS = {
     "income": "收入",
     "expense": "支出",
     "transfer": "轉帳",
+    "repay": "還款",  # display only: stored as two transfer legs plus an interest expense
 }
 INVESTMENT_KINDS = ("buy", "holding_in", "sell", "cash_dividend", "stock_dividend", "split")
 TW_MARKETS = ("TWSE", "TPEX")
@@ -46,6 +48,9 @@ class Account:
     start_date: str | None = None
     maturity_date: str | None = None
     group_name: str | None = None  # set on the per-currency parts of a multi-currency account
+    principal: Decimal | None = None  # loans: amount borrowed, term and grace period (rate/start_date shared)
+    term_years: Decimal | None = None
+    grace_years: Decimal | None = None
 
 
 @dataclass
@@ -122,3 +127,21 @@ class Tx:
     category_id: int | None = None
     transfer_group: str | None = None
     note: str = ""
+    recurring_id: int | None = None  # posted by a recurring rule
+    balance: Decimal | None = None  # 期初餘額: the account's balance on this date; amount is derived from it
+
+
+RECURRING_FREQS = {"monthly": "每月", "weekly": "每週", "yearly": "每年"}
+
+
+@dataclass
+class Recurring:
+    id: int | None
+    line: str  # a command line without a date
+    freq: str  # monthly / weekly / yearly
+    start_date: str  # anchors the day of month / weekday / month-day
+    end_date: str | None = None
+    last_date: str | None = None  # last date posted
+    active: bool = True
+    error: str | None = None
+    sort: int = 0

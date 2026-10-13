@@ -21,8 +21,10 @@ const MORE: [MoreKind, string][] = [
   ['withdraw', '提出現金'],
   ['stock_dividend', '股票股利'],
   ['split', '股票分割'],
+  ['repay', '還款'],
 ];
 const SPENDING = ['bank', 'cash', 'credit'];
+const DEBT = ['credit', 'loan']; // an opening balance on these is what is owed
 const CHIPS = 8;
 
 export interface ComposerOpen {
@@ -60,6 +62,7 @@ function blank(state: State, kind: ComposerKind = 'expense'): TxFields {
 
 function defaultAccount(state: State, kind: ComposerKind, more: MoreKind): string {
   const live = state.accounts.filter(a => !a.archived);
+  if (kind === 'more' && more === 'repay') return live.find(a => a.type === 'loan')?.name ?? '';
   const needsCash = kind === 'expense' || kind === 'income' || kind === 'transfer' || (kind === 'more' && (more === 'deposit' || more === 'withdraw'));
   if (!needsCash) return ''; // trades: let the symbol pick the broker account
   return (live.find(a => SPENDING.includes(a.type) && a.currency === 'TWD') ?? live.find(a => SPENDING.includes(a.type)) ?? live[0])?.name ?? '';
@@ -97,7 +100,9 @@ export function toLine(f: TxFields, today: string): string {
       add('息', word(f.symbol), clean(f.amount), acct);
       break;
     case 'more':
-      if (f.more === 'deposit' || f.more === 'withdraw') add(f.more === 'deposit' ? '存' : '提', clean(f.amount), acct);
+      // 還款: the loan is `account`, the payer `to_account`; no amount = this month's scheduled payment.
+      if (f.more === 'repay') add('還', clean(f.amount), acct, f.to_account && `@${f.to_account}`, f.interest && `利 ${clean(f.interest)}`);
+      else if (f.more === 'deposit' || f.more === 'withdraw') add(f.more === 'deposit' ? '存' : '提', clean(f.amount), f.more === 'deposit' && f.opening && '期初', acct);
       else add(f.more === 'stock_dividend' ? '配股' : '拆', word(f.symbol), clean(f.qty), acct);
       break;
   }
@@ -117,6 +122,8 @@ function missingFields(f: TxFields): string[] {
   } else if (f.kind === 'cash_dividend') {
     need(f.symbol, '股票代號');
     need(f.amount, '金額');
+  } else if (f.kind === 'more' && f.more === 'repay') {
+    need(f.account, '貸款帳戶');
   } else if (f.kind === 'more' && (f.more === 'stock_dividend' || f.more === 'split')) {
     need(f.symbol, '股票代號');
     need(f.qty, f.more === 'split' ? '分割比例' : '股數');
@@ -128,19 +135,29 @@ function missingFields(f: TxFields): string[] {
 }
 
 export function Composer({ state, open, onClose, onSaved }: Props) {
-  const [f, setF] = useState<TxFields>(() => open.fields ?? blank(state));
+  const [f, setF] = useState<TxFields>(() => {
+    const init = open.fields ?? blank(state);
+    // A debt opening is stored negative but typed as what is owed.
+    const debt = init.opening && DEBT.includes(state.accounts.find(a => a.name === init.account)?.type ?? '');
+    return debt ? { ...init, amount: init.amount.replace(/^-/, '') } : init;
+  });
   const [quick, setQuick] = useState(open.quick && open.fields?.line ? open.fields.line : '');
   const [preview, setPreview] = useState<Preview>({ status: 'empty' });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [allCats, setAllCats] = useState(false);
   const [newCat, setNewCat] = useState(false);
+  const [repeat, setRepeat] = useState(false);
   const firstField = useRef<HTMLInputElement>(null);
   const quickField = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
   const editing = open.editId != null;
 
-  const line = quick.trim() ? quick : toLine(f, state.today);
+  // 期初: on by default for an account that has nothing recorded yet (its first balance).
+  const openingAcct = state.accounts.find(a => a.name === f.account);
+  const opening = f.opening ?? openingAcct?.cash_sign === 0;
+  const owed = opening && f.kind === 'more' && f.more === 'deposit' && DEBT.includes(openingAcct?.type ?? '');
+  const line = quick.trim() ? quick : toLine({ ...f, opening, amount: owed && clean(f.amount) ? `-${clean(f.amount).replace(/^-/, '')}` : f.amount }, state.today);
   const set = (patch: Partial<TxFields>) => {
     setF(prev => ({ ...prev, ...patch }));
     setError(null);
@@ -179,12 +196,13 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
       return;
     }
     setBusy(true);
-    const r = await api.commit(line, open.editId);
+    const r = await api.commit(line, open.editId, canRepeat && repeat ? 'monthly' : null);
     setBusy(false);
     if (!r.ok) return setError(r.error);
     const month = f.date.slice(0, 7);
     const where = !quick.trim() && month !== state.today.slice(0, 7) ? `（記在 ${Number(month.slice(5))} 月，到「收支」切換月份查看）` : '';
-    onSaved(r.state, `${editing ? '已修改' : '已記錄'}：${preview.title}${where}`);
+    const again = canRepeat && repeat ? `，之後每月 ${Number(f.date.slice(8))} 日自動記` : '';
+    onSaved(r.state, `${editing ? '已修改' : '已記錄'}：${preview.title}${where}${again}`);
   }
 
   async function remove() {
@@ -202,7 +220,12 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
   const from = accounts.find(a => a.name === f.account);
   const to = accounts.find(a => a.name === f.to_account);
   const crossFx = from && to && from.currency !== to.currency && (from.currency === 'TWD' || to.currency === 'TWD');
-  const usesAmount = ['expense', 'income', 'transfer', 'cash_dividend'].includes(f.kind) || (f.kind === 'more' && (f.more === 'deposit' || f.more === 'withdraw'));
+  const repay = f.kind === 'more' && f.more === 'repay';
+  const usesAmount =
+    ['expense', 'income', 'transfer', 'cash_dividend'].includes(f.kind) || (f.kind === 'more' && (f.more === 'deposit' || f.more === 'withdraw' || repay));
+  // 每月重複 makes a 週期性 rule from this entry (new entries only, and only from the form).
+  const canRepeat = !editing && !quick.trim() && (['expense', 'income', 'transfer'].includes(f.kind) || repay);
+  const guess = preview.status === 'ready' && !f.category ? preview.guessed_category : null;
   // Taiwan codes are digits (+ optional letter); anything with other letters or a suffix is a 複委託 trade.
   const foreign = !!f.symbol.trim() && !/^\d{4,6}[A-Za-z]?$/.test(f.symbol.trim());
   const usesSymbol = ['buy', 'sell', 'cash_dividend'].includes(f.kind) || (f.kind === 'more' && (f.more === 'stock_dividend' || f.more === 'split'));
@@ -233,7 +256,7 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
                 role="radio"
                 aria-checked={f.more === k}
                 className={`chip ${f.more === k ? 'on' : ''}`}
-                onClick={() => set({ more: k, account: defaultAccount(state, 'more', k) })}
+                onClick={() => set({ more: k, account: defaultAccount(state, 'more', k), to_account: k === 'repay' ? defaultAccount(state, 'expense', k) : '', ...(k === 'repay' ? { amount: '' } : {}) })}
               >
                 {label}
               </button>
@@ -262,11 +285,26 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
               ref={f.kind === 'cash_dividend' ? undefined : firstField}
               className="num"
               inputMode="decimal"
-              placeholder="0"
+              placeholder={repay ? '空白＝這期月付' : '0'}
               value={f.amount}
               aria-label="金額"
               onChange={e => set({ amount: e.target.value })}
             />
+          </label>
+        )}
+
+        {f.kind === 'more' && f.more === 'deposit' && (
+          <label className="backfill">
+            <input type="checkbox" checked={opening} onChange={e => set({ opening: e.target.checked })} />
+            <span>
+              {owed ? '這是帳戶在這天的欠款（期初）' : '這是帳戶在這天的餘額（期初）'}
+              <span className="muted tiny">
+                　
+                {owed
+                  ? '金額填目前欠多少（含還沒出帳的刷卡）。之後補登這天以前的刷卡，會自動吸收，欠款不會重複計算'
+                  : '建帳用。之後補登這天以前的收入或支出，這筆會自動扣掉或加回，餘額不會重複計算'}
+              </span>
+            </span>
           </label>
         )}
 
@@ -320,10 +358,21 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
             <span className="field-label">分類</span>
             <div className="chips">
               {shownCats.map(c => (
-                <button key={c.id} type="button" className={`chip ${f.category === c.name ? 'on' : ''}`} onClick={() => set({ category: f.category === c.name ? '' : c.name })}>
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`chip ${f.category === c.name ? 'on' : ''} ${guess === c.name ? 'guess' : ''}`}
+                  title={guess === c.name ? '依過去同樣備註的紀錄' : undefined}
+                  onClick={() => set({ category: f.category === c.name ? '' : c.name })}
+                >
                   {c.name}
                 </button>
               ))}
+              {guess && !shownCats.some(c => c.name === guess) && (
+                <button type="button" className="chip guess" onClick={() => set({ category: guess })}>
+                  {guess}
+                </button>
+              )}
               {!allCats && cats.length > CHIPS && (
                 <button type="button" className="chip ghost" onClick={() => setAllCats(true)}>
                   更多…
@@ -346,7 +395,27 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
           </div>
         )}
 
-        {f.kind === 'transfer' ? (
+        {repay ? (
+          <>
+            <div className="field-row two">
+              <Field label="還哪一筆貸款">
+                <AccountSelect accounts={accounts.filter(a => a.type === 'loan')} value={f.account} onChange={account => set({ account })} placeholder="選擇貸款" />
+              </Field>
+              <Field label="從哪個帳戶付">
+                <AccountSelect accounts={accounts.filter(a => a.type !== 'loan')} value={f.to_account} onChange={to_account => set({ to_account })} />
+              </Field>
+            </div>
+            <div className="field-row two">
+              <Field label="利息" hint="空白＝剩餘本金 × 年利率 ÷ 12">
+                <input className="num" inputMode="decimal" value={f.interest ?? ''} placeholder="自動" onChange={e => set({ interest: e.target.value })} />
+              </Field>
+              <Field label="日期">
+                <input type="date" value={f.date} max={state.today} onChange={e => set({ date: e.target.value || state.today })} />
+              </Field>
+            </div>
+            {accounts.every(a => a.type !== 'loan') && <p className="muted small">先到「帳戶」新增一個「貸款」帳戶。</p>}
+          </>
+        ) : f.kind === 'transfer' ? (
           <>
             <div className="field-row two">
               <Field label="從">
@@ -386,6 +455,16 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
         <Field label="備註">
           <input value={f.note} placeholder="可不填" onChange={e => set({ note: e.target.value })} />
         </Field>
+
+        {canRepeat && (
+          <label className="backfill">
+            <input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)} />
+            <span>
+              每月重複
+              <span className="muted tiny">　之後每月 {Number(f.date.slice(8))} 日自動記一筆；在「收支 → 週期性」可以修改或停用</span>
+            </span>
+          </label>
+        )}
 
         <div className={`composer-preview ${preview.status}`} aria-live="polite">
           <PreviewText preview={error ? { status: 'error', message: error } : preview} />

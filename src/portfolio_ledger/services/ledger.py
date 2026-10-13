@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date as Date
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
 from typing import Any
@@ -27,7 +27,7 @@ from ..db import Db
 from ..models import ACCOUNT_TYPES, SPENDING_TYPES, TX_KINDS, Account, Category, Security, Tx
 from ..providers import cathay, twse, yahoo
 from ..providers.base import ProviderError, make_client
-from . import fees, fmt
+from . import fees, fmt, planner
 from .portfolio import Book, PortfolioError, replay
 from .quick import CATEGORY_KINDS, FIELD_NAMES, Command, ParseError, format_command, parse
 
@@ -50,6 +50,8 @@ def market_of(symbol: str) -> str:
         return "HK"
     return "US" if "." not in symbol else "INTL"
 COMPOSER_KINDS = ("expense", "income", "transfer", "buy", "sell", "cash_dividend")
+GUESS_DAYS = 365  # auto-category looks this far back
+LOAN_INTEREST = "貸款利息"
 BROKER_TYPES = ("broker_tw", "broker_us")
 ZERO = Decimal(0)
 MAX_GROUPS = 6
@@ -58,6 +60,10 @@ log = logging.getLogger(__name__)
 
 class EntryError(ValueError):
     pass
+
+
+class QuoteNotYet(EntryError):
+    """定額: the close it buys at is not published yet; a recurring rule waits instead of failing."""
 
 
 def taipei_now() -> datetime:
@@ -72,6 +78,9 @@ class Draft:
     to_account: Account | None = None
     category: str | None = None  # display name for income/expense
     new_category: str | None = None  # created on commit
+    guessed: bool = False  # category taken from past entries with the same note
+    repay: dict[str, Decimal] | None = None  # 還: principal, interest, owed (before)
+    dca: Decimal | None = None  # 定額: the fixed amount the buy was sized from
 
     @property
     def tx(self) -> Tx:
@@ -92,6 +101,8 @@ class Ledger:
         self._lock = threading.RLock()
         self._us_misses: dict[str, str] = {}  # symbols Yahoo didn't know, so typing doesn't refetch them
         self.status: dict[str, Any] = {"refreshed_at": None, "errors": [], "running": False}
+        self._filled: set[tuple[str, str]] = set()  # 定額 gaps already fetched from Yahoo
+        self._convert_openings()
 
     # ── settings ────────────────────────────────────────────────────────
 
@@ -215,6 +226,16 @@ class Ledger:
             acc.maturity_date = _optional_date(data.get("maturity_date"), "到期日")
             if acc.start_date and acc.maturity_date and acc.maturity_date <= acc.start_date:
                 raise EntryError("到期日要在起存日之後")
+        elif type_ == "loan":
+            acc.principal = _optional_positive(data.get("principal"), "貸款金額")
+            acc.rate = _optional_positive(data.get("rate"), "年利率")
+            acc.term_years = _optional_positive(data.get("term_years"), "年期")
+            acc.grace_years = _optional_positive(data.get("grace_years"), "寬限期")
+            acc.start_date = _optional_date(data.get("start_date"), "撥款日")
+            if acc.term_years is not None and acc.term_years == 0:
+                raise EntryError("年期要大於 0")
+            if acc.term_years and acc.grace_years and acc.grace_years >= acc.term_years:
+                raise EntryError("寬限期要比年期短")
         return repo.save_account(self.db, acc)
 
     def delete_account(self, account_id: int) -> None:
@@ -344,6 +365,27 @@ class Ledger:
             return partial[0], partial[0].name
         return None, name
 
+    def _guess_category(self, note: str, kind: str, skip: set[int]) -> Category | None:
+        """A category from the last year's entries of the same kind: the latest with the same note, else
+        notes containing one another when they all agree on one category."""
+        note = note.strip()
+        if not note:
+            return None
+        cats = {c.id: c for c in repo.list_categories(self.db, kind) if not c.archived}
+        since = (self.today() - timedelta(days=GUESS_DAYS)).isoformat()
+        past = [
+            t for t in repo.list_txs(self.db)
+            if t.kind == kind and t.category_id in cats and t.date >= since and t.note.strip()
+            and t.id not in skip and not t.transfer_group
+        ]  # fmt: skip
+        same = [t for t in past if t.note.strip() == note]
+        if same:
+            return cats[same[-1].category_id]
+        if len(note) < 2:
+            return None
+        near = {t.category_id for t in past if note in t.note or t.note.strip() in note}
+        return cats[near.pop()] if len(near) == 1 else None
+
     def build(self, cmd: Command, edit_id: int | None = None) -> Draft:
         """Resolve a parsed command into ready-to-save transactions, or raise EntryError."""
         if cmd.missing:
@@ -352,21 +394,28 @@ class Ledger:
         day = cmd.date or today
         if day > today:
             raise EntryError("日期不能在未來")
+        if cmd.interest is not None and cmd.action != "repay":
+            raise EntryError("「利」只用在還款")
         skip = self._edit_ids(edit_id)
-        keep_id = edit_id if len(skip) == 1 and cmd.action != "transfer" else None
+        keep_id = edit_id if len(skip) == 1 and cmd.action not in ("transfer", "repay") else None
         if cmd.action == "transfer":
             draft = self._build_transfer(cmd, day)
+        elif cmd.action == "repay":
+            draft = self._build_repay(cmd, day, skip)
+        elif cmd.action == "dca":
+            draft = self._build_dca(cmd, day, keep_id)
         elif cmd.action in CATEGORY_KINDS:
-            draft = self._build_flow(cmd, day, keep_id)
+            draft = self._build_flow(cmd, day, keep_id, skip)
         else:
             draft = self._build_trade(cmd, day, keep_id)
         self._check(draft.txs, skip)
         return draft
 
-    def _build_flow(self, cmd: Command, day: str, keep_id: int | None) -> Draft:
+    def _build_flow(self, cmd: Command, day: str, keep_id: int | None, skip: set[int]) -> Draft:
         assert cmd.amount is not None
         acc = self._pick_account(cmd, None)
-        cat, cat_name = self._resolve_category(cmd.category, cmd.action)
+        guess = self._guess_category(cmd.note, cmd.action, skip) if cmd.category is None else None
+        cat, cat_name = (guess, guess.name) if guess else self._resolve_category(cmd.category, cmd.action)
         tx = Tx(
             id=keep_id,
             account_id=acc.id or 0,
@@ -377,7 +426,7 @@ class Ledger:
             category_id=cat.id if cat else None,
             note=cmd.note,
         )
-        return Draft([tx], acc, category=cat_name, new_category=None if cat else cat_name)
+        return Draft([tx], acc, category=cat_name, new_category=None if cat else cat_name, guessed=guess is not None)
 
     def _build_transfer(self, cmd: Command, day: str) -> Draft:
         assert cmd.amount is not None
@@ -403,6 +452,168 @@ class Ledger:
                transfer_group=group, note=cmd.note),
         ]  # fmt: skip
         return Draft(legs, src, to_account=dst)
+
+    # ── 定期定額 ──
+
+    def _close_ready(self, sec: Security, day: str) -> bool:
+        """A close is final for days before today; today's only after the Taiwan close is out."""
+        today = self.today()
+        if day < today.isoformat():
+            return True
+        now = taipei_now()
+        return day == today.isoformat() and sec.is_tw and now.date() == today and now.time() >= time(14, 30)
+
+    def _dca_close(self, sec: Security, day: str) -> tuple[str, Decimal]:
+        """(trade date, close): the first trading day on or after `day` whose close is final."""
+        def first() -> tuple[str, Decimal] | None:
+            return next(((d, c) for d, c in repo.closes_from(self.db, sec.symbol, day) if self._close_ready(sec, d)), None)
+
+        found = first()
+        if (found is None or found[0] != day) and (sec.symbol, day) not in self._filled:
+            # Prices are stored only for days the app refreshed; fill gaps from Yahoo's daily bars.
+            self._filled.add((sec.symbol, day))
+            age = (self.today() - Date.fromisoformat(day)).days
+            ysym = f"{sec.symbol}.TW" if sec.market == "TWSE" else f"{sec.symbol}.TWO" if sec.market == "TPEX" else sec.symbol
+            try:
+                h = yahoo.chart(self.client, ysym, "1mo" if age < 25 else "6mo" if age < 170 else "5y")
+                repo.put_prices(self.db, [(sec.symbol, d, c) for d, c in h.closes])
+                found = first()
+            except ProviderError as e:
+                log.info("定額 %s: %s", sec.symbol, e)
+        if found is None:
+            raise QuoteNotYet(f"還沒有 {sec.symbol} {day} 的收盤價，收盤後會自動記")
+        return found
+
+    def _build_dca(self, cmd: Command, day: str, keep_id: int | None) -> Draft:
+        assert cmd.symbol is not None and cmd.amount is not None
+        sec = self.resolve_security(cmd.symbol)
+        trade_day, close = self._dca_close(sec, day)
+        qty = cmd.amount / close
+        qty = qty.to_integral_value(rounding=ROUND_FLOOR) if sec.is_tw else qty.quantize(Decimal("0.0001"), rounding=ROUND_FLOOR)
+        if qty <= 0:
+            raise EntryError(f"{fmt.money(cmd.amount, sec.currency)} 不夠買 1 股（收盤 {fmt.price(close)}）")
+        buy = Command("buy", symbol=sec.symbol, qty=qty, price=close, date=trade_day, account=cmd.account,
+                      fee=cmd.fee, note=cmd.note or "定期定額")  # fmt: skip
+        draft = self._build_trade(buy, trade_day, keep_id)
+        draft.dca = cmd.amount
+        return draft
+
+    # ── 期初餘額 ──
+
+    @staticmethod
+    def _precedes(x: Tx, day: str, opening_id: int | None) -> bool:
+        """Whether row x is part of an opening balance on `day`: dated earlier, or the same day and recorded
+        before it (a new opening, without an id yet, comes after everything already recorded)."""
+        if x.date != day:
+            return x.date < day
+        return x.id is not None and x.id != opening_id and (opening_id is None or x.id < opening_id)
+
+    def _before(self, account_id: int, day: str, opening_id: int | None) -> Decimal:
+        """What the account's rows before an opening balance add up to (the opening is net of these)."""
+        return sum((t.amount for t in repo.list_txs(self.db) if t.account_id == account_id and self._precedes(t, day, opening_id)), ZERO)
+
+    def _rebase(self) -> None:
+        """Re-derive every 期初餘額 amount after a change: balance − the account's earlier rows."""
+        txs = repo.list_txs(self.db)  # date, id order: earlier openings are settled first
+        before: dict[int, list[Tx]] = {}
+        changed: list[tuple[int, Decimal]] = []
+        for t in txs:
+            if t.balance is not None and t.id is not None:
+                amount = t.balance - sum((x.amount for x in before.get(t.account_id, []) if self._precedes(x, t.date, t.id)), ZERO)
+                if amount != t.amount:
+                    t.amount = amount
+                    changed.append((t.id, amount))
+            before.setdefault(t.account_id, []).append(t)
+        if changed:
+            repo.set_tx_amounts(self.db, changed)
+
+    def _convert_openings(self) -> None:
+        """Once: each account's first-entered deposit becomes its 期初餘額 (balance = what the account
+        held when it was entered), then amounts are re-derived. See DESIGN.md 5.1."""
+        if repo.get_setting(self.db, "openings_converted", "") == "1":
+            return
+        txs = repo.list_txs(self.db)
+        for acc in {t.account_id for t in txs}:
+            rows = [t for t in txs if t.account_id == acc]
+            if any(t.balance is not None for t in rows):
+                continue
+            deposits = [t for t in rows if t.kind == "deposit" and t.id is not None]
+            if not deposits:
+                continue
+            first = min(deposits, key=lambda t: t.id or 0)
+            held = first.amount + sum((t.amount for t in rows if (t.id or 0) < (first.id or 0) and t.date < first.date), ZERO)
+            repo.set_tx_balance(self.db, first.id or 0, held)
+        self._rebase()
+        repo.set_setting(self.db, "openings_converted", "1")
+
+    # ── loans ──
+
+    def _owed(self, loan: Account, day: str, skip: set[int]) -> Decimal:
+        """What is still owed on a loan account on `day` (its balance, sign flipped)."""
+        return -sum((t.amount for t in repo.list_txs(self.db) if t.account_id == loan.id and t.date <= day and t.id not in skip), ZERO)
+
+    @staticmethod
+    def _schedule(loan: Account) -> planner.Loan | None:
+        if not (loan.principal and loan.rate is not None and loan.term_years):
+            return None
+        return planner.amortize(float(loan.principal), float(loan.rate) / 100, float(loan.term_years), float(loan.grace_years or 0))
+
+    @staticmethod
+    def _period(loan: Account, day: str) -> int:
+        """Which instalment a payment in `day`'s month is (1 = the month after the drawdown)."""
+        if not loan.start_date:
+            return 1
+        s, d = Date.fromisoformat(loan.start_date), Date.fromisoformat(day)
+        return max(1, (d.year - s.year) * 12 + d.month - s.month)
+
+    def _scheduled_payment(self, loan: Account, day: str) -> Decimal | None:
+        sched = self._schedule(loan)
+        if sched is None:
+            return None
+        k = min(self._period(loan, day), sched.months)
+        return fmt.round_money(Decimal(str(sched.at(k))), loan.currency)
+
+    def _interest(self, loan: Account, owed: Decimal) -> Decimal:
+        return fmt.round_money(owed * (loan.rate or ZERO) / 100 / 12, loan.currency)
+
+    def _build_repay(self, cmd: Command, day: str, skip: set[int]) -> Draft:
+        names = [n for n in (cmd.account, cmd.to_account) if n]
+        if not names:
+            raise EntryError("還款要寫貸款帳戶：還 @房貸")
+        accs = [self._pick_account(cmd, None, n) for n in names]
+        loans = [a for a in accs if a.type == "loan"]
+        if len(loans) != 1:
+            raise EntryError("兩個都是貸款帳戶" if loans else "還款要指定一個貸款帳戶（帳戶類型「貸款」）")
+        loan = loans[0]
+        payer = next((a for a in accs if a is not loan), None) or self._pick_account(Command("expense"), None)
+        if payer.type == "loan":
+            raise EntryError("付款帳戶不能是貸款帳戶")
+        if payer.currency != loan.currency:
+            raise EntryError(f"付款帳戶「{payer.name}」和貸款的幣別不同")
+        owed = self._owed(loan, day, skip)
+        if owed <= 0:
+            raise EntryError(f"「{loan.name}」已經還清了")
+        interest = cmd.interest if cmd.interest is not None else self._interest(loan, owed)
+        amount = cmd.amount if cmd.amount is not None else self._scheduled_payment(loan, day)
+        if amount is None:
+            raise EntryError(f"「{loan.name}」沒有設定貸款金額、利率和年期，請寫金額：還 30000 @{loan.name}")
+        if amount < interest:
+            raise EntryError(f"金額比這期利息 {fmt.money(interest, loan.currency)} 還少")
+        principal = min(amount - interest, owed)
+        rate = self._rate(payer, day, None)
+        group = uuid.uuid4().hex
+        # The loan leg is kept even at 0 (grace period): it is what ties the group to its loan.
+        txs = [Tx(None, loan.id or 0, day, "transfer", amount=principal, fx_rate=rate, transfer_group=group, note=cmd.note)]
+        if principal:
+            txs.insert(0, Tx(None, payer.id or 0, day, "transfer", amount=-principal, fx_rate=rate, transfer_group=group, note=cmd.note))
+        cat, cat_name = self._resolve_category(LOAN_INTEREST, "expense")
+        if interest:
+            txs.append(Tx(None, payer.id or 0, day, "expense", amount=-interest, fx_rate=rate,
+                          category_id=cat.id if cat else None, transfer_group=group, note=cmd.note))  # fmt: skip
+        return Draft(
+            txs, payer, to_account=loan, category=cat_name, new_category=None if cat or not interest else cat_name,
+            repay={"principal": principal, "interest": interest, "owed": owed},
+        )
 
     def _build_trade(self, cmd: Command, day: str, keep_id: int | None) -> Draft:
         sec = self.resolve_security(cmd.symbol) if cmd.symbol else None
@@ -460,6 +671,9 @@ class Ledger:
         else:  # withdraw
             assert cmd.amount is not None
             amount = -cmd.amount
+        opening = cmd.amount if cmd.opening else None
+        if opening is not None:  # 期初餘額: what this row adds is the stated balance minus what came before
+            amount = opening - self._before(acc.id or 0, day, keep_id)
 
         tx = Tx(
             id=keep_id,
@@ -475,6 +689,7 @@ class Ledger:
             # On a TWD account fx_rate is only set for 台幣交割 trades: the conversion rate used.
             fx_rate=trade_fx if cross else self._rate(acc, day, cmd.fx),
             note=cmd.note,
+            balance=opening,
         )
         return Draft([tx], acc, sec)
 
@@ -553,13 +768,28 @@ class Ledger:
                     "message": "還缺：" + "、".join(FIELD_NAMES[m] for m in cmd.missing),
                 }
             draft = self.build(cmd, edit_id)
+        except QuoteNotYet as e:  # 定額 before the close: show what it will do
+            assert cmd.amount is not None
+            return {"status": "ready", "title": f"定期定額 {sec_title or cmd.symbol}", "parts": [str(e)],
+                    "total": fmt.money(-cmd.amount, signed=True), "currency": "TWD", "sign": -1}  # fmt: skip
         except EntryError as e:
             return {"status": "error", "message": str(e)}
-        return {"status": "ready", **self._describe(draft)}
+        return {"status": "ready", **self._describe(draft), "guessed_category": draft.category if draft.guessed else None}
 
     def _describe(self, d: Draft) -> dict[str, Any]:
         t, cur = d.tx, d.account.currency
         parts: list[str] = []
+        if d.repay is not None and d.to_account is not None:
+            r = d.repay
+            parts += [f"本金 {fmt.money(r['principal'], cur)}", f"利息 {fmt.money(r['interest'], cur)}",
+                      f"還完剩 {fmt.money(r['owed'] - r['principal'], cur)}", d.account.name]  # fmt: skip
+            if t.date != self.today().isoformat():
+                parts.append(t.date)
+            if t.note:
+                parts.append(t.note)
+            total = r["principal"] + r["interest"]
+            return {"title": f"還款 {d.to_account.name}", "parts": parts, "total": fmt.money(-total, cur, signed=True),
+                    "currency": cur, "sign": -1}  # fmt: skip
         if t.kind == "transfer" and d.to_account is not None:
             got = d.txs[1].amount
             title = f"轉帳 {d.account.name} → {d.to_account.name}"
@@ -573,14 +803,29 @@ class Ledger:
                 parts.append(t.note)
             return {"title": title, "parts": parts, "total": fmt.money(t.amount, cur, signed=True),
                     "currency": cur, "sign": -1}  # fmt: skip
+        if t.balance is not None:
+            owed = t.balance < 0
+            parts.append(f"{d.account.name}在這天的{'欠款' if owed else '餘額'}")
+            if t.amount != t.balance:  # the earlier rows it already includes
+                parts.append(f"已含之前記的 {fmt.money(abs(t.balance - t.amount), cur)}")
+            if t.date != self.today().isoformat():
+                parts.append(t.date)
+            if t.note:
+                parts.append(t.note)
+            return {"title": f"期初{'欠款' if t.balance < 0 else '餘額'} {d.account.name}", "parts": parts, "total": fmt.money(t.balance, cur),
+                    "currency": cur, "sign": fmt.sign(t.balance)}  # fmt: skip
         if t.kind in CATEGORY_KINDS:
             title = f"{TX_KINDS[t.kind]} {d.category}"
             if d.new_category:
                 parts.append("新分類")
+            elif d.guessed:
+                parts.append("依過去紀錄")
             parts.append(d.account.name)
         else:
             name = f"{d.security.name} {d.security.symbol}" if d.security else d.account.name
             title = f"{TX_KINDS[t.kind]} {name}"
+        if d.dca is not None:
+            parts.append(f"定期定額 {fmt.money(d.dca, cur)}，{t.date} 收盤價")
         if t.kind in ("buy", "sell", "holding_in"):
             parts.append(f"{fmt.qty(t.qty)} 股 @ {fmt.price(t.price)}")
         elif t.kind == "stock_dividend":
@@ -664,7 +909,24 @@ class Ledger:
             ],
         }
 
-    def commit(self, text: str, edit_id: int | None = None) -> int:
+    def adopt(self, text: str, recurring_id: int) -> bool:
+        """週期性: when the entry a rule is about to post was already recorded by hand (same account, kind,
+        amount, category, note and date, not tied to a rule), tie that one to the rule instead."""
+        with self._lock:
+            draft = self.build(parse(text, self.today()))
+            if len(draft.txs) != 1:
+                return False
+            t = draft.tx
+            key = (t.account_id, t.date, t.kind, t.amount, t.category_id, t.symbol, t.qty, t.note.strip())
+            for x in repo.list_txs(self.db):
+                if x.recurring_id is None and not x.transfer_group and x.id is not None and (
+                    x.account_id, x.date, x.kind, x.amount, x.category_id, x.symbol, x.qty, x.note.strip()
+                ) == key:
+                    repo.mark_recurring(self.db, x.id, recurring_id)
+                    return True
+            return False
+
+    def commit(self, text: str, edit_id: int | None = None, recurring_id: int | None = None) -> int:
         with self._lock:
             try:
                 cmd = parse(text, self.today())
@@ -675,11 +937,20 @@ class Ledger:
             skip = self._edit_ids(edit_id)
             draft = self.build(cmd, edit_id)
             if draft.new_category:
-                draft.tx.category_id = repo.add_category(self.db, draft.new_category, draft.tx.kind)
+                new_id = repo.add_category(self.db, draft.new_category, "expense" if cmd.action == "repay" else cmd.action)
+                for t in draft.txs:
+                    if t.kind in CATEGORY_KINDS and t.category_id is None:
+                        t.category_id = new_id
+            if recurring_id is None and edit_id is not None:
+                old = repo.get_tx(self.db, edit_id)
+                recurring_id = old.recurring_id if old else None  # an edited posting stays marked as recurring
+            for t in draft.txs:
+                t.recurring_id = recurring_id
             if len(draft.txs) == 1 and draft.tx.id is not None:
                 tx_id = repo.save_tx(self.db, draft.tx)  # plain edit keeps its id (and same-day order)
             else:
                 tx_id = repo.replace_txs(self.db, sorted(skip), draft.txs)[0]
+            self._rebase()
             self.snapshot()
             return tx_id
 
@@ -688,6 +959,7 @@ class Ledger:
             ids = self._edit_ids(tx_id)
             self._check([], ids)
             repo.replace_txs(self.db, sorted(ids), [])
+            self._rebase()
             self.snapshot()
 
     def tx_line(self, tx_id: int) -> str:
@@ -696,6 +968,13 @@ class Ledger:
         if t is None:
             raise EntryError("這筆交易已經不存在")
         acc = repo.get_account(self.db, t.account_id)
+        if t.transfer_group and (repay := self._repay_parts(repo.txs_in_group(self.db, t.transfer_group))):
+            loan, payer, principal, interest = repay
+            owed = self._owed(loan, t.date, {x.id for x in repo.txs_in_group(self.db, t.transfer_group) if x.id})
+            return format_command(
+                "repay", amount=principal + interest, date=t.date, account=loan.name, to_account=payer.name,
+                interest=interest if interest != self._interest(loan, owed) else None, note=t.note,
+            )  # fmt: skip
         if t.kind == "transfer" and t.transfer_group:
             legs = repo.txs_in_group(self.db, t.transfer_group)
             out = next((x for x in legs if x.amount < 0), t)
@@ -740,6 +1019,9 @@ class Ledger:
         if t.fx_rate is not None and acc is not None:
             on_day = repo.fx_on(self.db, acc.currency, t.date)
             fx = t.fx_rate if on_day is None or on_day[0] != t.fx_rate else None
+        if t.balance is not None:
+            return format_command("deposit", amount=t.balance, date=t.date, account=acc.name if acc else None,
+                                  opening=True, note=t.note)  # fmt: skip
         return format_command(
             t.kind,
             symbol=t.symbol,
@@ -753,6 +1035,19 @@ class Ledger:
             fx=fx,
             note=t.note,
         )
+
+    def _repay_parts(self, legs: list[Tx]) -> tuple[Account, Account, Decimal, Decimal] | None:
+        """(loan, payer, principal, interest) when a transfer group is a 還款, else None."""
+        accs = {x.account_id: repo.get_account(self.db, x.account_id) for x in legs}
+        loan_leg = next((x for x in legs if x.kind == "transfer" and (a := accs[x.account_id]) and a.type == "loan" and x.amount >= 0), None)
+        fee = next((x for x in legs if x.kind == "expense"), None)
+        if loan_leg is None or (fee is None and len(legs) > 1):
+            return None  # an ordinary transfer (prepaying principal, or the drawdown)
+        payer_leg = fee or next((x for x in legs if x is not loan_leg), None)
+        loan, payer = accs[loan_leg.account_id], accs[payer_leg.account_id] if payer_leg else None
+        if loan is None or payer is None:
+            return None
+        return loan, payer, loan_leg.amount, -fee.amount if fee else ZERO
 
     # ── page state ──────────────────────────────────────────────────────
 
@@ -850,6 +1145,8 @@ class Ledger:
                 label = "定存"
             elif a.type == "credit":
                 label = "信用卡"  # normally negative: a liability, shown apart from cash
+            elif a.type == "loan":
+                label = a.name  # 房貸, 車貸: listed by name under 負債
             else:
                 label = f"{fmt.CURRENCY_NAMES.get(a.currency, a.currency)}現金"
             cash_twd[label] = cash_twd.get(label, ZERO) + bal * (fx_now or ZERO)
@@ -992,12 +1289,30 @@ class Ledger:
         for t in v["txs"]:
             if t.transfer_group:
                 legs.setdefault(t.transfer_group, []).append(t)
+        repays = {g: r for g, rows in legs.items() if any(x.kind == "expense" for x in rows) and (r := self._repay_parts(rows))}
         txs = []
         for t in reversed(v["txs"]):
             acc = acc_by_id.get(t.account_id)
             sec = v["secs"].get(t.symbol) if t.symbol else None
             cur = acc.currency if acc else "TWD"
             to_name = received = None
+            if t.transfer_group in repays:
+                if t.kind != "expense":
+                    continue  # a 還款 is listed once, on its interest row
+                loan, payer, principal, interest = repays[t.transfer_group]
+                paid = principal + interest
+                note = f"本金 {fmt.money(principal, cur)}・利息 {fmt.money(interest, cur)}" + (f"・{t.note}" if t.note else "")
+                txs.append(
+                    {
+                        "category": None, "to_account": loan.name, "received": None,
+                        "twd": fmt.money(paid * (t.fx_rate or Decimal(1))), "value": float(paid * (t.fx_rate or Decimal(1))),
+                        "id": t.id, "date": t.date, "kind": "repay", "label": TX_KINDS["repay"], "symbol": None,
+                        "name": None, "qty": None, "ratio": None, "price": None,
+                        "amount": fmt.money(-paid, cur, signed=True), "sign": -1, "currency": cur,
+                        "account": payer.name, "note": note, "recurring": t.recurring_id is not None,
+                    }
+                )  # fmt: skip
+                continue
             if t.kind == "transfer" and t.transfer_group:
                 if t.amount >= 0:
                     continue  # shown once, on the outgoing leg
@@ -1016,17 +1331,20 @@ class Ledger:
                     "id": t.id,
                     "date": t.date,
                     "kind": t.kind,
-                    "label": TX_KINDS.get(t.kind, t.kind),
+                    "label": ("期初欠款" if t.balance < 0 else "期初餘額") if t.balance is not None else TX_KINDS.get(t.kind, t.kind),
                     "symbol": t.symbol,
                     "name": sec.name if sec else None,
                     "qty": fmt.qty(t.qty) if t.kind != "split" else None,
                     "ratio": fmt.qty(t.qty) if t.kind == "split" else None,
                     "price": fmt.price(t.price),
-                    "amount": fmt.money(t.amount, cur, signed=True) if t.amount else None,
+                    "amount": fmt.money(t.balance, cur) if t.balance is not None
+                    else fmt.money(t.amount, cur, signed=True) if t.amount else None,
                     "sign": fmt.sign(t.amount),
                     "currency": cur,
                     "account": acc.name if acc else "",
                     "note": t.note,
+                    "value": float(abs(t.amount) * (t.fx_rate if t.fx_rate is not None and cur != "TWD" else Decimal(1))),
+                    "recurring": t.recurring_id is not None,
                 }
             )
 
@@ -1047,6 +1365,9 @@ class Ledger:
                 "rate": str(a.rate) if a.rate is not None else None,
                 "start_date": a.start_date,
                 "maturity_date": a.maturity_date,
+                "principal": str(a.principal) if a.principal is not None else None,
+                "term_years": str(a.term_years) if a.term_years is not None else None,
+                "grace_years": str(a.grace_years) if a.grace_years is not None else None,
                 "archived": a.archived,
             }
             for a, bal, held in v["accounts"]
@@ -1073,6 +1394,7 @@ class Ledger:
             "categories": self._categories(v["txs"]),
             "account_groups": self._groups(v),
             "deposits": self._deposits(v),
+            "loans": self._loans(v),
             "fx_positions": self._fx_positions(v),
             "accounts": accounts,
             "account_types": ACCOUNT_TYPES,
@@ -1126,6 +1448,8 @@ class Ledger:
             "tax": plain(cmd.tax),
             "fx": plain(cmd.fx),
             "total": plain(cmd.total),
+            "interest": plain(cmd.interest),
+            "opening": cmd.opening,
             "date": cmd.date or self.today().isoformat(),
             "note": cmd.note,
             "backfill": backfill,
@@ -1174,6 +1498,46 @@ class Ledger:
                 }
             )
         out.sort(key=lambda d: (d["days_left"] is None, d["days_left"] or 0))
+        return out
+
+    def loan_payments(self) -> list[tuple[str, Decimal]]:
+        """(name, this month's scheduled payment) for every loan still owed, for the health check."""
+        today = self.today().isoformat()
+        out = []
+        for a in repo.list_accounts(self.db):
+            if a.type == "loan" and self._owed(a, today, set()) > 0 and (pay := self._scheduled_payment(a, today)):
+                out.append((a.name, pay * (self._rate(a, today, None) or Decimal(1))))
+        return out
+
+    def _loans(self, v: dict[str, Any]) -> list[dict[str, Any]]:
+        """Loan accounts: what is owed, share repaid, this month's payment and when it would be paid off."""
+        today = self.today()
+        out = []
+        for a, bal, _ in v["accounts"]:
+            if a.type != "loan" or a.archived:
+                continue
+            owed, cur = -bal, a.currency
+            sched = self._schedule(a)
+            payment = self._scheduled_payment(a, today.isoformat())
+            left = None
+            if sched is not None and owed > 0:
+                left = planner.payoff(float(owed), float(a.rate or 0) / 100, sched, self._period(a, today.isoformat()))
+            out.append(
+                {
+                    "id": a.id,
+                    "name": a.name,
+                    "currency": cur,
+                    "owed": fmt.money(max(owed, ZERO), cur),
+                    "principal": fmt.money(a.principal, cur) if a.principal else None,
+                    "ratio": float(min(1, max(0, 1 - owed / a.principal))) if a.principal else None,
+                    "rate": f"{a.rate.normalize():f}%" if a.rate is not None else None,
+                    "payment": fmt.money(payment, cur) if payment and owed > 0 else None,
+                    "payoff": planner.shift_month(today.isoformat()[:7], left[0] - 1) if left else None,
+                    "months_left": left[0] if left else None,
+                    "interest_left": fmt.money(Decimal(str(round(left[1]))), cur) if left else None,
+                    "done": owed <= 0,
+                }
+            )
         return out
 
     def _fx_positions(self, v: dict[str, Any]) -> list[dict[str, Any]]:

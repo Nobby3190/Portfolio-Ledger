@@ -27,12 +27,7 @@ class FinanceError(ValueError):
     pass
 
 
-def shift_month(month: str, n: int) -> str:
-    y, m = int(month[:4]), int(month[5:7])
-    m += n
-    y += (m - 1) // 12
-    m = (m - 1) % 12 + 1
-    return f"{y:04d}-{m:02d}"
+shift_month = planner.shift_month
 
 
 def _twd(t: Tx) -> Decimal:
@@ -154,6 +149,114 @@ def month_report(lg: Ledger, month: str | None = None) -> dict[str, Any]:
         "income_categories": income_rows,
         "trend": trend,
         "tabs": tabs,
+        "has_data": bool(income or expense),
+    }
+
+
+def year_report(lg: Ledger, year: str | int | None = None) -> dict[str, Any]:
+    """The 收支 view's 年 mode: a year's totals against last year, its months, categories and net worth."""
+    today = lg.today()
+    try:
+        y = int(year) if year else today.year
+    except ValueError:
+        raise FinanceError("年份要是數字") from None
+    if not 1900 <= y <= today.year:
+        raise FinanceError(f"只能看到 {today.year} 年")
+    flows = _flows(repo.list_txs(lg.db))
+    this_month = today.isoformat()[:7]
+
+    elapsed = today.month if y == today.year else 12  # months the averages are over
+
+    def months(yy: int, upto: int = 12) -> list[str]:
+        return [f"{yy:04d}-{m:02d}" for m in range(1, upto + 1)]
+
+    def total(yy: int, kind: str, upto: int = 12) -> Decimal:
+        return sum((_sum(flows, m, kind) for m in months(yy, upto)), ZERO)
+
+    def by_cat(yy: int, kind: str, upto: int = 12) -> dict[int | None, Decimal]:
+        out: dict[int | None, Decimal] = {}
+        for m in months(yy, upto):
+            for cid, x in flows.get(m, {}).get(kind, {}).items():
+                out[cid] = out.get(cid, ZERO) + x
+        return out
+
+    # This year is compared with the same months of last year (Jan–Oct against Jan–Oct).
+    income, expense = total(y, "income"), total(y, "expense")
+    last_income, last_expense = total(y - 1, "income", elapsed), total(y - 1, "expense", elapsed)
+    net, last_net = income - expense, last_income - last_expense
+
+    def change(now: Decimal, before: Decimal) -> dict[str, Any] | None:
+        if not before:
+            return None
+        return {"delta": fmt.money(now - before, signed=True), "pct": fmt.pct(now - before, before), "sign": fmt.sign(now - before)}
+
+    spent, before = by_cat(y, "expense"), by_cat(y - 1, "expense", elapsed)
+    rows = []
+    for c in repo.list_categories(lg.db, "expense"):
+        x, l = spent.get(c.id, ZERO), before.get(c.id, ZERO)
+        if not x and not l:
+            continue
+        budget = c.budget * 12 if c.budget else None
+        rows.append(
+            {
+                "id": c.id, "name": c.name, "amount": fmt.money(x), "share": float(x / expense) if expense else 0.0,
+                "per_month": fmt.money(x / elapsed), "last": fmt.money(l) if l else None,
+                "delta": fmt.money(x - l, signed=True) if l else None, "delta_sign": fmt.sign(x - l),
+                "budget": fmt.money(budget) if budget else None, "budget_ratio": float(x / budget) if budget else None,
+                "raw": x,
+            }
+        )  # fmt: skip
+    rows.sort(key=lambda r: (-r["raw"], r["name"]))
+    for r in rows:
+        r.pop("raw")
+    earned = by_cat(y, "income")
+    income_rows = [
+        {"name": c.name, "amount": fmt.money(earned[c.id]), "share": float(earned[c.id] / income) if income else 0.0}
+        for c in repo.list_categories(lg.db, "income")
+        if earned.get(c.id)
+    ]
+
+    trend = []
+    for m in months(y):
+        inc, exp = _sum(flows, m, "income"), _sum(flows, m, "expense")
+        trend.append({"month": m, "label": f"{int(m[5:])} 月", "income": float(inc), "expense": float(exp),
+                      "income_s": fmt.money(inc), "expense_s": fmt.money(exp), "future": m > this_month})  # fmt: skip
+
+    snaps = repo.list_snapshots(lg.db)
+    first_day, last_day = f"{y}-01-01", f"{y}-12-31"
+    start = next((x for d, x in reversed(snaps) if d < first_day), None)
+    if start is None:
+        start = next((x for d, x in snaps if first_day <= d <= last_day), None)
+    end = next((x for d, x in reversed(snaps) if d <= last_day), None)
+    worth = None
+    if start is not None and end is not None:
+        worth = {"start": fmt.money(start), "end": fmt.money(end), "change": fmt.money(end - start, signed=True),
+                 "pct": fmt.pct(end - start, start) if start > 0 else None, "sign": fmt.sign(end - start)}  # fmt: skip
+
+    years = sorted({int(m[:4]) for m in flows} | {today.year})
+    return {
+        "year": y,
+        "label": f"{y} 年",
+        "is_current": y == today.year,
+        "elapsed": elapsed,
+        "income": fmt.money(income),
+        "expense": fmt.money(expense),
+        "net": fmt.money(net, signed=True),
+        "net_sign": fmt.sign(net),
+        "savings_rate": fmt.pct(net, income) if income else None,
+        "per_month": fmt.money(expense / elapsed),
+        "compare_label": f"比 {y - 1} 年" if elapsed == 12 else f"比 {y - 1} 年 1–{elapsed} 月",
+        "vs_last": {
+            "income": change(income, last_income),
+            "expense": change(expense, last_expense),
+            "net": change(net, last_net) if last_net else None,
+            "savings_rate": fmt.pct(last_net, last_income) if last_income else None,
+        },
+        "categories": rows,
+        "income_categories": income_rows,
+        "trend": trend,
+        "worth": worth,
+        "tabs": [{"year": yy, "label": f"{yy}", "expense": fmt.money(total(yy, "expense"))} for yy in years],
         "has_data": bool(income or expense),
     }
 
@@ -481,6 +584,9 @@ def advice(lg: Ledger) -> dict[str, Any]:
         if loan:
             loans.append(max(loan.grace_payment, loan.payment))
             loan_names.append(p.name)
+    for name, pay in lg.loan_payments():  # loans already running
+        loans.append(float(pay))
+        loan_names.append(name)
 
     inputs = advisor.Inputs(
         liquid=float(liquid),

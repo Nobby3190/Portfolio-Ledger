@@ -947,8 +947,19 @@ button.trow:hover {
 
 .form-row {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr;
+  /* minmax(0, …): a date input's built-in width must not push the last column out of the card */
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
+}
+
+.form-row > label {
+  min-width: 0;
+}
+
+.form-row input,
+.form-row select {
+  width: 100%;
+  min-width: 0;
 }
 
 .checks {
@@ -1333,6 +1344,12 @@ button.trow:hover {
 .chip.ghost {
   border-style: dashed;
   color: var(--muted);
+}
+
+/* 自動分類: the category the note suggests (used unless another is picked) */
+.chip.guess:not(.on) {
+  border: 1px dashed var(--brand);
+  color: var(--brand);
 }
 
 .chip-input {
@@ -1961,4 +1978,123 @@ button.trow:hover {
 .month-tabs > button.future:not(.on) {
   border-style: dashed;
   background: transparent;
+}
+
+/* ── 記帳強化 (v1.3) ─────────────────────────────────────── */
+
+/* a comparison under a hero metric (年 mode) */
+.metrics .delta {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.72;
+}
+
+.money-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.money-bar .seg {
+  width: 140px;
+}
+
+.money-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.rec-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted);
+  vertical-align: 1px;
+}
+
+.loan-t {
+  --cols: minmax(0, 1fr) 150px 120px 150px;
+}
+
+.ycat-t {
+  --cols: minmax(0, 1fr) 110px 90px 150px 90px;
+}
+
+.rec-t {
+  --cols: minmax(0, 1fr) 110px 120px;
+  margin-bottom: 12px;
+}
+
+.rec-t .trow.paused {
+  opacity: 0.55;
+}
+
+.search {
+  display: grid;
+  gap: 12px;
+}
+
+.search-q {
+  height: 40px;
+  font-size: 16px;
+  background: var(--card-2);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 6px 12px;
+  outline: none;
+}
+
+.search-q:focus {
+  border-color: var(--ink-2);
+}
+
+.search-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.search .range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.search-sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 16px;
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  font-size: 14px;
+}
+
+.search-sum .quiet {
+  margin-left: auto;
+}
+
+@media (max-width: 760px) {
+  .loan-t {
+    --cols: minmax(0, 1fr) 130px;
+  }
+  .ycat-t {
+    --cols: minmax(0, 1fr) 110px;
+  }
+  .rec-t {
+    --cols: minmax(0, 1fr) 110px;
+  }
+  .loan-t .hide-sm,
+  .ycat-t .hide-sm,
+  .rec-t .hide-sm {
+    display: none;
+  }
 }

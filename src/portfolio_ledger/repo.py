@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from decimal import Decimal
 
 from .db import Db
-from .models import Account, Category, Goal, LifePlan, Security, Tx
+from .models import Account, Category, Goal, LifePlan, Recurring, Security, Tx
 
 
 def _d(v: str | None) -> Decimal | None:
@@ -36,6 +36,9 @@ def _account(r: sqlite3.Row) -> Account:
         start_date=r["start_date"],
         maturity_date=r["maturity_date"],
         group_name=r["group_name"],
+        principal=_d(r["principal"]),
+        term_years=_d(r["term_years"]),
+        grace_years=_d(r["grace_years"]),
     )
 
 
@@ -52,19 +55,20 @@ def get_account(db: Db, account_id: int) -> Account | None:
 def save_account(db: Db, a: Account) -> int:
     values = (
         a.name, a.type, a.currency, _s(a.fee_discount), _s(a.fee_min), int(a.archived), a.sort,
-        _s(a.rate), a.start_date, a.maturity_date, a.group_name,
+        _s(a.rate), a.start_date, a.maturity_date, a.group_name, _s(a.principal), _s(a.term_years), _s(a.grace_years),
     )  # fmt: skip
     with db.write() as c:
         if a.id is None:
             cur = c.execute(
                 "INSERT INTO accounts (name, type, currency, fee_discount, fee_min, archived, sort,"
-                " rate, start_date, maturity_date, group_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " rate, start_date, maturity_date, group_name, principal, term_years, grace_years)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 values,
             )
             return int(cur.lastrowid or 0)
         c.execute(
             "UPDATE accounts SET name=?, type=?, currency=?, fee_discount=?, fee_min=?, archived=?, sort=?,"
-            " rate=?, start_date=?, maturity_date=?, group_name=? WHERE id=?",
+            " rate=?, start_date=?, maturity_date=?, group_name=?, principal=?, term_years=?, grace_years=? WHERE id=?",
             (*values, a.id),
         )
         return a.id
@@ -142,8 +146,10 @@ def count_tw_securities(db: Db) -> int:
 # ── transactions ─────────────────────────────────────────────────────────
 
 _TX_COLS = (
-    "account_id, date, kind, symbol, qty, price, amount, fee, tax, fx_rate, category_id, transfer_group, note"
+    "account_id, date, kind, symbol, qty, price, amount, fee, tax, fx_rate, category_id, transfer_group, note,"
+    " recurring_id, balance"
 )
+_TX_MARKS = ",".join("?" * len(_TX_COLS.split(",")))
 
 
 def _tx(r: sqlite3.Row) -> Tx:
@@ -162,6 +168,8 @@ def _tx(r: sqlite3.Row) -> Tx:
         category_id=r["category_id"],
         transfer_group=r["transfer_group"],
         note=r["note"],
+        recurring_id=r["recurring_id"],
+        balance=_d(r["balance"]),
     )
 
 
@@ -180,6 +188,8 @@ def _tx_values(t: Tx) -> tuple:
         t.category_id,
         t.transfer_group,
         t.note,
+        t.recurring_id,
+        _s(t.balance),
     )
 
 
@@ -196,7 +206,7 @@ def get_tx(db: Db, tx_id: int) -> Tx | None:
 def save_tx(db: Db, t: Tx) -> int:
     with db.write() as c:
         if t.id is None:
-            cur = c.execute(f"INSERT INTO transactions ({_TX_COLS}) VALUES ({','.join('?' * 13)})", _tx_values(t))
+            cur = c.execute(f"INSERT INTO transactions ({_TX_COLS}) VALUES ({_TX_MARKS})", _tx_values(t))
             return int(cur.lastrowid or 0)
         sets = ", ".join(f"{col.strip()}=?" for col in _TX_COLS.split(","))
         c.execute(f"UPDATE transactions SET {sets} WHERE id=?", (*_tx_values(t), t.id))
@@ -206,6 +216,17 @@ def save_tx(db: Db, t: Tx) -> int:
 def delete_tx(db: Db, tx_id: int) -> None:
     with db.write() as c:
         c.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
+
+
+def set_tx_amounts(db: Db, rows: list[tuple[int, Decimal]]) -> None:
+    """(id, amount) pairs: derived amounts of 期初餘額 rows."""
+    with db.write() as c:
+        c.executemany("UPDATE transactions SET amount = ? WHERE id = ?", [(str(a), i) for i, a in rows])
+
+
+def set_tx_balance(db: Db, tx_id: int, balance: Decimal) -> None:
+    with db.write() as c:
+        c.execute("UPDATE transactions SET balance = ? WHERE id = ?", (str(balance), tx_id))
 
 
 def txs_in_group(db: Db, group: str) -> list[Tx]:
@@ -219,9 +240,64 @@ def replace_txs(db: Db, remove_ids: list[int], add: list[Tx]) -> list[int]:
         for i in remove_ids:
             c.execute("DELETE FROM transactions WHERE id = ?", (i,))
         for t in add:
-            cur = c.execute(f"INSERT INTO transactions ({_TX_COLS}) VALUES ({','.join('?' * 13)})", _tx_values(t))
+            cur = c.execute(f"INSERT INTO transactions ({_TX_COLS}) VALUES ({_TX_MARKS})", _tx_values(t))
             ids.append(int(cur.lastrowid or 0))
     return ids
+
+
+# ── recurring ────────────────────────────────────────────────────────────
+
+_REC_COLS = ("line", "freq", "start_date", "end_date", "last_date", "active", "error", "sort")
+
+
+def _recurring(r: sqlite3.Row) -> Recurring:
+    return Recurring(
+        r["id"], r["line"], r["freq"], r["start_date"], r["end_date"], r["last_date"], bool(r["active"]), r["error"], r["sort"]
+    )
+
+
+def list_recurring(db: Db) -> list[Recurring]:
+    return [_recurring(r) for r in db.query("SELECT * FROM recurring ORDER BY sort, id")]
+
+
+def get_recurring(db: Db, rule_id: int) -> Recurring | None:
+    rows = db.query("SELECT * FROM recurring WHERE id = ?", (rule_id,))
+    return _recurring(rows[0]) if rows else None
+
+
+def save_recurring(db: Db, r: Recurring) -> int:
+    values = (r.line, r.freq, r.start_date, r.end_date, r.last_date, int(r.active), r.error, r.sort)
+    with db.write() as c:
+        if r.id is None:
+            cur = c.execute(
+                f"INSERT INTO recurring ({', '.join(_REC_COLS)}) VALUES ({', '.join('?' * len(_REC_COLS))})", values
+            )
+            return int(cur.lastrowid or 0)
+        c.execute(f"UPDATE recurring SET {', '.join(f'{k}=?' for k in _REC_COLS)} WHERE id=?", (*values, r.id))
+        return r.id
+
+
+def has_recurring_tx(db: Db, rule_id: int, start: str, end: str) -> bool:
+    """Whether the rule already posted in [start, end) (a 定額 trades on the first trading day from start)."""
+    rows = db.query("SELECT 1 FROM transactions WHERE recurring_id = ? AND date >= ? AND date < ? LIMIT 1", (rule_id, start, end))
+    return bool(rows)
+
+
+def mark_recurring(db: Db, tx_id: int, rule_id: int) -> None:
+    """Tag a transaction (and the other rows of its group) as posted by a rule."""
+    with db.write() as c:
+        c.execute(
+            "UPDATE transactions SET recurring_id = ? WHERE id = ?"
+            " OR transfer_group = (SELECT transfer_group FROM transactions WHERE id = ?)",
+            (rule_id, tx_id, tx_id),
+        )
+
+
+def delete_recurring(db: Db, rule_id: int) -> None:
+    """The rule only; transactions it posted stay (and forget where they came from)."""
+    with db.write() as c:
+        c.execute("UPDATE transactions SET recurring_id = NULL WHERE recurring_id = ?", (rule_id,))
+        c.execute("DELETE FROM recurring WHERE id = ?", (rule_id,))
 
 
 # ── categories & goals ───────────────────────────────────────────────────
@@ -330,6 +406,12 @@ def put_prices(db: Db, rows: Iterable[tuple[str, str, Decimal]]) -> None:
             "INSERT OR REPLACE INTO prices (symbol, date, close) VALUES (?, ?, ?)",
             [(s, d, str(p)) for s, d, p in rows],
         )
+
+
+def closes_from(db: Db, symbol: str, start: str) -> list[tuple[str, Decimal]]:
+    """Stored daily closes on or after `start`, oldest first."""
+    rows = db.query("SELECT date, close FROM prices WHERE symbol = ? AND date >= ? ORDER BY date", (symbol, start))
+    return [(r["date"], Decimal(r["close"])) for r in rows]
 
 
 def put_fx(db: Db, rows: Iterable[tuple[str, str, Decimal]]) -> None:

@@ -35,11 +35,15 @@ export function Sheet({ title, onClose, children, wide = false }: { title: strin
 // 國泰證券: 2.8折, 低消 1 元 for app/web orders (checked 2026-10-11; see DESIGN.md 5.3).
 export const BROKERS: { name: string; fee_discount: string; fee_min: string }[] = [{ name: '國泰證券', fee_discount: '0.28', fee_min: '1' }];
 
+// Accounts whose balance is normally negative (money owed), so no warning.
+const DEBT_TYPES = ['credit', 'loan'];
+
 const PRESETS: AccountInput[] = [
   { name: '國泰證券', type: 'broker_tw', currency: 'TWD', fee_discount: '0.28', fee_min: '1' },
   { name: '銀行', type: 'bank', currency: 'TWD' },
   { name: '信用卡', type: 'credit', currency: 'TWD' },
   { name: '定存', type: 'deposit', currency: 'TWD' },
+  { name: '房貸', type: 'loan', currency: 'TWD' },
 ];
 
 export function AccountsPanel({ state, onState, onClose }: { state: State; onState(s: State): void; onClose(): void }) {
@@ -68,6 +72,9 @@ export function AccountsPanel({ state, onState, onClose }: { state: State; onSta
       rate: a.rate ?? '',
       start_date: a.start_date ?? '',
       maturity_date: a.maturity_date ?? '',
+      principal: a.principal ?? '',
+      term_years: a.term_years ?? '',
+      grace_years: a.grace_years ?? '',
       archived: a.archived,
     });
   };
@@ -88,7 +95,7 @@ export function AccountsPanel({ state, onState, onClose }: { state: State; onSta
               </span>
             </span>
             <span className="cell r">
-              <span className={a.cash_sign < 0 && a.type !== 'credit' ? 'warn' : ''}>
+              <span className={a.cash_sign < 0 && !DEBT_TYPES.includes(a.type) ? 'warn' : ''}>
                 <Money className="num" value={a.cash} />
                 {a.currency !== 'TWD' && <span className="ccy-tag">{a.currency}</span>}
               </span>
@@ -146,8 +153,8 @@ export function AccountsPanel({ state, onState, onClose }: { state: State; onSta
           );
         })}
       </div>
-      {state.accounts.some(a => a.cash_sign < 0 && a.type !== 'credit') && (
-        <p className="note">有帳戶現金是負的，代表買進或花掉的錢還沒記到那個帳戶；用「其他 → 存入現金」補上。信用卡是負的屬於正常（代表欠款）。</p>
+      {state.accounts.some(a => a.cash_sign < 0 && !DEBT_TYPES.includes(a.type)) && (
+        <p className="note">有帳戶現金是負的，代表買進或花掉的錢還沒記到那個帳戶；用「其他 → 存入現金」補上。信用卡和貸款是負的屬於正常（代表欠款）。</p>
       )}
 
       {editing ? (
@@ -367,6 +374,33 @@ function AccountForm(props: {
             <input type="date" value={a.maturity_date ?? ''} onChange={e => set({ maturity_date: e.target.value })} />
           </label>
           <small className="muted">本金用轉帳記：轉 500000 @銀行 @{a.name || '定存'}</small>
+        </>
+      )}
+      {a.type === 'loan' && (
+        <>
+          <label>
+            貸款金額
+            <input value={a.principal ?? ''} inputMode="decimal" placeholder="8000000" onChange={e => set({ principal: e.target.value })} />
+          </label>
+          <label>
+            年利率（%）
+            <input value={a.rate ?? ''} inputMode="decimal" placeholder="2.1" onChange={e => set({ rate: e.target.value })} />
+          </label>
+          <label>
+            年期
+            <input value={a.term_years ?? ''} inputMode="decimal" placeholder="30" onChange={e => set({ term_years: e.target.value })} />
+          </label>
+          <label>
+            寬限期（年）
+            <input value={a.grace_years ?? ''} inputMode="decimal" placeholder="沒有就留空" onChange={e => set({ grace_years: e.target.value })} />
+          </label>
+          <label>
+            撥款日
+            <input type="date" value={a.start_date ?? ''} onChange={e => set({ start_date: e.target.value })} />
+          </label>
+          <small className="muted">
+            撥款用轉帳記：轉 8000000 @{a.name || '房貸'} @銀行（已經還了一段時間的，填目前剩餘本金）。每月還款：還 @{a.name || '房貸'} @銀行
+          </small>
         </>
       )}
       {a.id != null && (

@@ -35,6 +35,24 @@ def amortize(principal: float, annual_rate: float, years: float, grace_years: fl
     return Loan(grace_pay, pay, grace, months, grace_pay * grace + pay * n - principal)
 
 
+def payoff(balance: float, annual_rate: float, loan: Loan, k: int) -> tuple[int, float] | None:
+    """(months, interest) to repay `balance`, paying loan.at(k), loan.at(k+1)... (its level payment once
+    the term is over); None when the payment never covers the interest. Rates are fractions."""
+    r = annual_rate / 12
+    months, interest = 0, 0.0
+    while balance > 0.5:
+        if months >= 1200:
+            return None
+        pay = loan.at(k + months) or loan.payment
+        due = balance * r
+        if pay <= due and k + months > loan.grace_months:  # past the grace period and still not shrinking
+            return None
+        interest += due
+        balance -= min(balance, max(0.0, pay - due))
+        months += 1
+    return months, interest
+
+
 @dataclass
 class PlanEvent:
     """A big purchase in the projection, all in today's money."""
@@ -170,6 +188,15 @@ def xirr(flows: list[tuple[Date, float]]) -> float | None:
         else:
             lo, f_lo = mid, f_mid
     return (lo + hi) / 2
+
+
+def shift_month(month: str, n: int) -> str:
+    """YYYY-MM moved by n months."""
+    y, m = int(month[:4]), int(month[5:7])
+    m += n
+    y += (m - 1) // 12
+    m = (m - 1) % 12 + 1
+    return f"{y:04d}-{m:02d}"
 
 
 def months_between(start: Date, end: Date) -> int:

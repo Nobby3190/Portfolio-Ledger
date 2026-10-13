@@ -55,6 +55,8 @@ export interface TxRow {
   to_account: string | null;
   received: string | null;
   twd: string | null;
+  value: number; // TWD, unsigned: amount filters and totals in the search panel
+  recurring: boolean; // posted by a 週期性 rule
 }
 
 export interface AccountRow {
@@ -73,7 +75,25 @@ export interface AccountRow {
   rate: string | null;
   start_date: string | null;
   maturity_date: string | null;
+  principal: string | null; // loans
+  term_years: string | null;
+  grace_years: string | null;
   archived: boolean;
+}
+
+export interface Loan {
+  id: number;
+  name: string;
+  currency: string;
+  owed: string;
+  principal: string | null;
+  ratio: number | null; // share repaid
+  rate: string | null;
+  payment: string | null; // this month's scheduled payment
+  payoff: string | null; // YYYY-MM at the scheduled payment
+  months_left: number | null;
+  interest_left: string | null;
+  done: boolean;
 }
 
 export interface Deposit {
@@ -132,6 +152,7 @@ export interface State {
   transactions: TxRow[];
   categories: { id: number; name: string; kind: 'income' | 'expense'; uses: number }[];
   deposits: Deposit[];
+  loans: Loan[];
   fx_positions: FxPosition[];
   accounts: AccountRow[];
   account_groups: AccountGroup[];
@@ -154,7 +175,15 @@ export type Preview =
   | { status: 'empty' }
   | { status: 'error'; message: string }
   | { status: 'incomplete'; title: string | null; message: string }
-  | { status: 'ready'; title: string; parts: string[]; total: string | null; currency: string; sign: Sign }
+  | {
+      status: 'ready';
+      title: string;
+      parts: string[];
+      total: string | null;
+      currency: string;
+      sign: Sign;
+      guessed_category?: string | null; // 自動分類: taken from past entries with the same note
+    }
   | {
       status: 'lookup';
       results: {
@@ -178,6 +207,9 @@ export interface AccountInput {
   rate?: string;
   start_date?: string;
   maturity_date?: string;
+  principal?: string;
+  term_years?: string;
+  grace_years?: string;
   archived?: boolean;
 }
 
@@ -216,6 +248,76 @@ export interface MonthReport {
   tabs: MonthPoint[]; // the trend, plus the months still to come this year when it ends at this month
   is_future: boolean;
   has_data: boolean;
+}
+
+export interface YearChange {
+  delta: string;
+  pct: string | null;
+  sign: Sign;
+}
+
+export interface YearReport {
+  year: number;
+  label: string;
+  is_current: boolean;
+  elapsed: number; // months the averages are over
+  income: string;
+  expense: string;
+  net: string;
+  net_sign: Sign;
+  savings_rate: string | null;
+  per_month: string;
+  compare_label: string; // 比 2025 年, or 比 2025 年 1–10 月 for the year in progress
+  vs_last: {
+    income: YearChange | null;
+    expense: YearChange | null;
+    net: YearChange | null;
+    savings_rate: string | null; // last year's
+  };
+  categories: {
+    id: number;
+    name: string;
+    amount: string;
+    share: number;
+    per_month: string;
+    last: string | null;
+    delta: string | null;
+    delta_sign: Sign;
+    budget: string | null;
+    budget_ratio: number | null;
+  }[];
+  income_categories: { name: string; amount: string; share: number }[];
+  trend: MonthPoint[];
+  worth: { start: string; end: string; change: string; pct: string | null; sign: Sign } | null;
+  tabs: { year: number; label: string; expense: string }[];
+  has_data: boolean;
+}
+
+export interface RecurringRule {
+  id: number;
+  line: string;
+  title: string;
+  kind: string;
+  amount: string | null;
+  freq: RecurringFreq;
+  freq_label: string;
+  start_date: string;
+  end_date: string | null;
+  last_date: string | null;
+  next_date: string | null;
+  active: boolean;
+  error: string | null;
+}
+
+export type RecurringFreq = 'monthly' | 'weekly' | 'yearly';
+
+export interface RecurringInput {
+  id?: number;
+  line: string;
+  freq: RecurringFreq;
+  start_date: string;
+  end_date: string;
+  active: boolean;
 }
 
 export interface MonthPoint {
@@ -374,7 +476,7 @@ export interface BacktestResult {
 }
 
 export type ComposerKind = 'expense' | 'income' | 'transfer' | 'buy' | 'sell' | 'cash_dividend' | 'more';
-export type MoreKind = 'deposit' | 'withdraw' | 'stock_dividend' | 'split';
+export type MoreKind = 'deposit' | 'withdraw' | 'stock_dividend' | 'split' | 'repay';
 
 export interface TxFields {
   kind: ComposerKind;
@@ -390,6 +492,8 @@ export interface TxFields {
   tax: string;
   fx: string;
   total?: string; // 補登: the broker app's 總成本
+  interest?: string; // 還款: the bank's interest when it differs from the computed one
+  opening?: boolean; // 存入現金 that states the account's balance on that date (undefined: decided by the account)
   date: string;
   note: string;
   backfill?: boolean; // 買進 that only adds the holding (cash already reflects it)

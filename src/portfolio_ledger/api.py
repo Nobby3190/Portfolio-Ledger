@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .services import finance
+from .services import finance, recurring
 from .services.finance import FinanceError
 from .services.ledger import EntryError, Ledger
 
@@ -38,9 +38,11 @@ class Api:
     def preview(self, text: str, edit_id: int | None = None) -> dict[str, Any]:
         return _call(lambda: {"preview": self._ledger.preview(text, edit_id)})
 
-    def commit(self, text: str, edit_id: int | None = None) -> dict[str, Any]:
+    def commit(self, text: str, edit_id: int | None = None, repeat: str | None = None) -> dict[str, Any]:
         def run() -> dict[str, Any]:
             tx_id = self._ledger.commit(text, edit_id)
+            if repeat and edit_id is None:  # 記一筆的「每月重複」
+                recurring.from_commit(self._ledger, text, tx_id, repeat)
             return {"id": tx_id, "state": self._ledger.state()}
 
         return _call(run)
@@ -111,6 +113,31 @@ class Api:
         def run() -> dict[str, Any]:
             finance.set_total_budget(self._ledger, amount)
             return {"month": finance.month_report(self._ledger, month)}
+
+        return _call(run)
+
+    def get_year(self, year: int | None = None) -> dict[str, Any]:
+        return _call(lambda: {"year": finance.year_report(self._ledger, year)})
+
+    # ── 週期性收支 ──
+
+    def get_recurring(self) -> dict[str, Any]:
+        return _call(lambda: {"rules": recurring.rows(self._ledger)})
+
+    def recurring_backfill(self, data: dict[str, Any]) -> dict[str, Any]:
+        return _call(lambda: {"count": recurring.backfill_count(self._ledger, data)})
+
+    def save_recurring(self, data: dict[str, Any]) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            posted = recurring.save(self._ledger, data)
+            return {"posted": posted, "rules": recurring.rows(self._ledger), "state": self._ledger.state()}
+
+        return _call(run)
+
+    def delete_recurring(self, rule_id: int) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            recurring.delete(self._ledger, rule_id)
+            return {"rules": recurring.rows(self._ledger), "state": self._ledger.state()}
 
         return _call(run)
 

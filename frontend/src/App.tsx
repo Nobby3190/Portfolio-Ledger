@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { Activity } from './components/Activity';
 import { AdviceCard } from './components/Advice';
+import { RecurringPanel, SearchPanel } from './components/Bookkeeping';
 import { Composer, type ComposerOpen } from './components/Composer';
 import { DepositsFx } from './components/DepositsFx';
 import { Holdings } from './components/Holdings';
+import { LoansCard } from './components/Loans';
 import { MoneyView } from './components/MoneyView';
 import { AccountsPanel, SettingsPanel } from './components/Panels';
 import { PlanView } from './components/PlanView';
@@ -12,7 +14,7 @@ import { AllocationCard, NetWorthCard } from './components/Summary';
 import { PrivacyContext } from './lib/privacy';
 import type { State } from './types';
 
-type Panel = 'accounts' | 'settings' | null;
+type Panel = 'accounts' | 'settings' | 'search' | 'recurring' | null;
 type View = 'assets' | 'money' | 'plan';
 const VIEWS: [View, string][] = [
   ['assets', '資產'],
@@ -26,6 +28,7 @@ export default function App() {
   const [panel, setPanel] = useState<Panel>(null);
   const [view, setViewState] = useState<View>('assets');
   const [composer, setComposer] = useState<ComposerOpen | null>(null);
+  const [back, setBack] = useState<Panel>(null); // the panel to return to after editing from it
   const [toast, setToast] = useState<string | null>(null);
 
   const setView = useCallback((v: View) => {
@@ -72,6 +75,21 @@ export default function App() {
     else setToast(r.error);
   }, []);
 
+  // Editing a search result: the composer replaces the panel, which comes back when it closes.
+  const editFromSearch = useCallback(
+    (id: number) => {
+      setPanel(null);
+      setBack('search');
+      void edit(id);
+    },
+    [edit],
+  );
+  const closeComposer = useCallback(() => {
+    setComposer(null);
+    setPanel(back);
+    setBack(null);
+  }, [back]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.metaKey) return;
@@ -90,6 +108,10 @@ export default function App() {
       } else if (k === ',') {
         e.preventDefault();
         setPanel('settings');
+      } else if (k === 'f') {
+        e.preventDefault();
+        setComposer(null);
+        setPanel('search');
       } else if (k === 'r') {
         e.preventDefault();
         void api.refresh().then(load);
@@ -167,6 +189,7 @@ export default function App() {
                 transactions={state.transactions}
                 onEdit={edit}
               />
+              <LoansCard state={state} className="span-12" />
               {state.deposits.length + state.fx_positions.length > 0 ? (
                 <>
                   <DepositsFx state={state} className="span-6" />
@@ -177,7 +200,7 @@ export default function App() {
               )}
             </div>
           )}
-          {view === 'money' && <MoneyView state={state} onEdit={edit} />}
+          {view === 'money' && <MoneyView state={state} onEdit={edit} onPanel={setPanel} />}
           {view === 'plan' && <PlanView state={state} />}
         </main>
 
@@ -186,16 +209,18 @@ export default function App() {
             key={composer.editId ?? 'new'}
             state={state}
             open={composer}
-            onClose={() => setComposer(null)}
+            onClose={closeComposer}
             onSaved={(s, message) => {
               setState(s);
-              setComposer(null);
+              closeComposer();
               setToast(message);
             }}
           />
         )}
         {panel === 'accounts' && <AccountsPanel state={state} onState={setState} onClose={() => setPanel(null)} />}
         {panel === 'settings' && <SettingsPanel state={state} onState={setState} onClose={() => setPanel(null)} />}
+        {panel === 'search' && <SearchPanel state={state} onEdit={editFromSearch} onClose={() => setPanel(null)} />}
+        {panel === 'recurring' && <RecurringPanel state={state} onState={setState} onToast={setToast} onClose={() => setPanel(null)} />}
         {toast && (
           <div className="toast" role="status">
             {toast}
@@ -222,7 +247,7 @@ function FirstSteps({ onAdd }: { onAdd(): void }) {
         </button>
       </header>
       <ol>
-        <li>在「其他 → 存入現金」記下每個帳戶現在有多少錢</li>
+        <li>在「其他 → 存入現金」記下每個帳戶現在有多少錢（勾選「期初」，之後補登以前的收支不會重複計算）</li>
         <li>在「買進」勾選「補登過去買的股票」補上手上的持股，日期選當初買進那天（不會再扣現金）</li>
         <li>之後每筆花費、收入、交易都按右上角「＋ 記一筆」</li>
       </ol>

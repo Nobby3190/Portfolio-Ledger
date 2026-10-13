@@ -1,15 +1,65 @@
-import { useContext, useEffect, useState } from 'react';
+import { type ReactNode, useContext, useEffect, useState } from 'react';
 import { api } from '../api';
 import { Money, PrivacyContext } from '../lib/privacy';
 import type { MonthReport, State } from '../types';
 import { TxList } from './Activity';
 import { PairBars } from './Charts';
+import { YearView } from './YearView';
 
-const FLOW_KINDS = ['income', 'expense', 'transfer'];
+const FLOW_KINDS = ['income', 'expense', 'transfer', 'repay'];
 
-export function MoneyView({ state, onEdit }: { state: State; onEdit(id: number): void }) {
-  const hidden = useContext(PrivacyContext);
+export function MoneyView({ state, onEdit, onPanel }: { state: State; onEdit(id: number): void; onPanel(p: 'search' | 'recurring'): void }) {
+  const [mode, setMode] = useState<'month' | 'year'>('month');
   const [month, setMonth] = useState<string | null>(null);
+  const bar = (
+    <div className="money-bar span-12">
+      <div className="seg" role="radiogroup" aria-label="看一個月或一整年">
+        {(['month', 'year'] as const).map(k => (
+          <button key={k} type="button" role="radio" aria-checked={mode === k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>
+            {k === 'month' ? '月' : '年'}
+          </button>
+        ))}
+      </div>
+      <span className="money-actions">
+        <button type="button" className="quiet" onClick={() => onPanel('recurring')}>
+          週期性
+        </button>
+        <button type="button" className="quiet" onClick={() => onPanel('search')} title="⌘F">
+          搜尋
+        </button>
+      </span>
+    </div>
+  );
+  if (mode === 'year')
+    return (
+      <div className="grid">
+        {bar}
+        <YearView
+          state={state}
+          onPickMonth={m => {
+            setMonth(m === state.today.slice(0, 7) ? null : m);
+            setMode('month');
+          }}
+        />
+      </div>
+    );
+  return <MonthView state={state} onEdit={onEdit} month={month} setMonth={setMonth} bar={bar} />;
+}
+
+function MonthView({
+  state,
+  onEdit,
+  month,
+  setMonth,
+  bar,
+}: {
+  state: State;
+  onEdit(id: number): void;
+  month: string | null;
+  setMonth(m: string | null): void;
+  bar: ReactNode;
+}) {
+  const hidden = useContext(PrivacyContext);
   const [report, setReport] = useState<MonthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,6 +101,7 @@ export function MoneyView({ state, onEdit }: { state: State; onEdit(id: number):
   const thisMonth = state.today.slice(0, 7);
   return (
     <div className="grid">
+      {bar}
       <nav className="month-tabs span-12" aria-label="選月份">
         <button type="button" className="quiet" onClick={() => setMonth(m.prev)} aria-label="更早">
           ‹
