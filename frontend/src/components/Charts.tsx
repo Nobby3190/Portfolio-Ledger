@@ -144,16 +144,20 @@ export function LineChart({ labels, series, target, height = 220, ariaLabel, for
                 </linearGradient>
               </defs>
               <polygon
+                className="area-fill"
                 points={`${x(0)},${PAD.top + ih} ${series[0].values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')} ${x(n - 1)},${PAD.top + ih}`}
                 fill={`url(#${fillId})`}
               />
             </>
           )}
           {series.map(s => (
-            <polyline
+            // The main line gets pathLength 1 so it can draw itself in with one dash offset;
+            // the dashed quiet line keeps real lengths for its dash pattern.
+            <path
               key={s.name}
-              points={s.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}
-              className={`ln ${s.style}`}
+              d={`M${s.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('L')}`}
+              pathLength={s.style === 'main' ? 1 : undefined}
+              className={`ln ${s.style} ${s.style === 'main' ? 'draw' : ''}`}
             />
           ))}
           {marks
@@ -249,9 +253,9 @@ export function PairBars({ data, names, ariaLabel, height = 180, onPick, selecte
                 key={d.label}
                 onPointerEnter={() => setHover(i)}
                 onClick={onPick ? () => onPick(i) : undefined}
-                style={onPick ? { cursor: 'pointer' } : undefined}
+                style={{ cursor: onPick ? 'pointer' : undefined, '--i': i } as React.CSSProperties}
               >
-                <rect x={PAD.left + slot * i} y={PAD.top} width={slot} height={ih} className="hit" />
+                <rect x={PAD.left + slot * i} y={PAD.top} width={slot} height={ih} rx="6" className={`hit ${hover === i ? 'on' : ''}`} />
                 <rect x={cx - bw - 1} y={y(d.a)} width={bw} height={Math.max(0, PAD.top + ih - y(d.a))} rx="2" className="bar quiet" />
                 <rect x={cx + 1} y={y(d.b)} width={bw} height={Math.max(0, PAD.top + ih - y(d.b))} rx="2" className="bar main" />
                 <text x={cx} y={height - 6} className={`tick ${hover === i || selected === i ? 'strong' : ''}`} textAnchor="middle">

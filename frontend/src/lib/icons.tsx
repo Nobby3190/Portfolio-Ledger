@@ -79,6 +79,7 @@ const PATHS = {
     </>
   ),
   transfer: <path d="M4 8h15M15 4l4 4-4 4M20 16H5M9 12l-4 4 4 4" />,
+  check: <path d="M5 12.5 10 17.5 19 7" />,
   dots: (
     <g fill="currentColor" stroke="none">
       <circle cx="6" cy="12" r="1.5" />

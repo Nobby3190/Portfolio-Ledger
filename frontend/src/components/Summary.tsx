@@ -1,4 +1,4 @@
-import { Money, signClass } from '../lib/privacy';
+import { Money, RollingMoney, signClass } from '../lib/privacy';
 import type { State } from '../types';
 import { LineChart } from './Charts';
 
@@ -10,7 +10,7 @@ export function NetWorthCard({ state, className = '' }: { state: State; classNam
       <p className="label">總資產</p>
       <h1 className="hero-num">
         <span className="ccy">NT$</span>
-        <Money value={state.total} />
+        <RollingMoney id="total" value={state.total} />
       </h1>
       {invested && (
         <dl className="metrics">
@@ -30,6 +30,27 @@ export function NetWorthCard({ state, className = '' }: { state: State; classNam
           </div>
         </dl>
       )}
+      {!invested && h.length < 2 && state.allocation_groups.groups.length > 0 && (
+        <dl className="metrics">
+          {state.allocation_groups.groups.map(g => (
+            <div key={g.key}>
+              <dt>{g.label}</dt>
+              <dd>
+                <Money className="num" value={g.value} />
+              </dd>
+            </div>
+          ))}
+          {state.allocation_groups.debt_total && (
+            <div>
+              <dt>負債</dt>
+              <dd>
+                <Money className="num" value={state.allocation_groups.debt_total} />
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+      {h.length < 2 && <p className="note hero-note">淨值走勢從第二天開始畫，每天自動記一次</p>}
       {h.length >= 2 && (
         <div className="hero-chart">
           <LineChart

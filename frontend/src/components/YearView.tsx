@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { categoryIcon, IconBadge } from '../lib/icons';
-import { Money, signClass } from '../lib/privacy';
+import { Money, RollingMoney, signClass } from '../lib/privacy';
 import type { State, YearChange, YearReport } from '../types';
 import { PairBars } from './Charts';
 
@@ -52,7 +52,7 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
             <p className="label">{y.is_current ? `今年到 ${y.elapsed} 月花了` : `${y.label}花了`}</p>
             <h1 className="hero-num">
               <span className="ccy">NT$</span>
-              <Money value={y.expense} />
+              <RollingMoney id="year-expense" value={y.expense} />
             </h1>
           </div>
         </div>

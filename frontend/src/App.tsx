@@ -11,6 +11,8 @@ import { MoneyView } from './components/MoneyView';
 import { AccountsPanel, SettingsPanel } from './components/Panels';
 import { PlanView } from './components/PlanView';
 import { AllocationCard, NetWorthCard } from './components/Summary';
+import { Icon } from './lib/icons';
+import { FreshContext } from './lib/motion';
 import { PrivacyContext } from './lib/privacy';
 import type { State } from './types';
 
@@ -29,7 +31,9 @@ export default function App() {
   const [view, setViewState] = useState<View>('assets');
   const [composer, setComposer] = useState<ComposerOpen | null>(null);
   const [back, setBack] = useState<Panel>(null); // the panel to return to after editing from it
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; ok: boolean; n: number } | null>(null);
+  const [fresh, setFresh] = useState<ReadonlySet<number>>(new Set());
+  const say = useCallback((text: string, ok = true) => setToast(t => ({ text, ok, n: (t?.n ?? 0) + 1 })), []);
 
   const setView = useCallback((v: View) => {
     setViewState(v);
@@ -63,6 +67,25 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  useEffect(() => {
+    if (fresh.size === 0) return;
+    const t = setTimeout(() => setFresh(new Set()), 2400);
+    return () => clearTimeout(t);
+  }, [fresh]);
+
+  // The dark hero cards carry a faint glow that follows the pointer (CSS reads --mx/--my).
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const card = (e.target as Element | null)?.closest?.<HTMLElement>('.card.hero');
+      if (!card) return;
+      const r = card.getBoundingClientRect();
+      card.style.setProperty('--mx', `${e.clientX - r.left}px`);
+      card.style.setProperty('--my', `${e.clientY - r.top}px`);
+    };
+    document.addEventListener('pointermove', onMove);
+    return () => document.removeEventListener('pointermove', onMove);
+  }, []);
+
   const togglePrivacy = useCallback(async () => {
     if (!state) return;
     const r = await api.saveSettings({ privacy: state.settings.privacy === '1' ? '0' : '1' });
@@ -72,8 +95,8 @@ export default function App() {
   const edit = useCallback(async (id: number) => {
     const r = await api.txFields(id);
     if (r.ok) setComposer({ editId: id, fields: r.fields });
-    else setToast(r.error);
-  }, []);
+    else say(r.error, false);
+  }, [say]);
 
   // Editing a search result: the composer replaces the panel, which comes back when it closes.
   const editFromSearch = useCallback(
@@ -122,7 +145,19 @@ export default function App() {
   }, [togglePrivacy, load, setView]);
 
   if (!state) {
-    return <main className="page">{loadError ? <p className="message bad">{loadError}</p> : null}</main>;
+    return (
+      <main className="page">
+        {loadError ? (
+          <p className="message bad">{loadError}</p>
+        ) : (
+          <div className="grid" aria-busy="true" aria-label="載入中">
+            <div className="card skel tall span-7" />
+            <div className="card skel tall span-5" />
+            <div className="card skel span-12" />
+          </div>
+        )}
+      </main>
+    );
   }
 
   const hidden = state.settings.privacy === '1';
@@ -138,7 +173,8 @@ export default function App() {
               帳本
               <span className="brand-en">Ledger</span>
             </span>
-            <nav className="views" aria-label="視圖">
+            <nav className="views" aria-label="視圖" style={{ '--i': VIEWS.findIndex(([v]) => v === view) } as React.CSSProperties}>
+              <span className="views-pill" aria-hidden />
               {VIEWS.map(([v, label], i) => (
                 <button key={v} type="button" className={view === v ? 'on' : ''} aria-current={view === v ? 'page' : undefined} title={`⌘${i + 1}`} onClick={() => setView(v)}>
                   {label}
@@ -170,39 +206,41 @@ export default function App() {
           </div>
         </header>
 
-        <main className="page">
-          {state.missing_fx.length > 0 && (
-            <p className="message bad span-12">還沒有 {state.missing_fx.join('、')} 匯率，這些帳戶暫時不計入總資產；連上網路後會自動更新。</p>
-          )}
-          {view === 'assets' && (
-            <div className="grid">
-              <NetWorthCard state={state} className="span-7" />
-              <AllocationCard state={state} className="span-5" />
-              <AdviceCard state={state} />
-              {state.transactions.length === 0 && state.accounts.length > 0 && <FirstSteps onAdd={() => setComposer({ editId: null })} />}
-              <Holdings
-                holdings={state.holdings}
-                closed={state.closed}
-                value={state.holdings_value}
-                unrealized={state.holdings_unrealized}
-                unrealizedSign={state.holdings_unrealized_sign}
-                transactions={state.transactions}
-                onEdit={edit}
-              />
-              <LoansCard state={state} className="span-12" />
-              {state.deposits.length + state.fx_positions.length > 0 ? (
-                <>
-                  <DepositsFx state={state} className="span-6" />
-                  <Activity transactions={state.transactions} onEdit={edit} className="span-6" initial={8} />
-                </>
-              ) : (
-                <Activity transactions={state.transactions} onEdit={edit} className="span-12" initial={10} />
-              )}
-            </div>
-          )}
-          {view === 'money' && <MoneyView state={state} onEdit={edit} onPanel={setPanel} />}
-          {view === 'plan' && <PlanView state={state} />}
-        </main>
+        <FreshContext.Provider value={fresh}>
+          <main className="page">
+            {state.missing_fx.length > 0 && (
+              <p className="message bad span-12">還沒有 {state.missing_fx.join('、')} 匯率，這些帳戶暫時不計入總資產；連上網路後會自動更新。</p>
+            )}
+            {view === 'assets' && (
+              <div className="grid">
+                <NetWorthCard state={state} className="span-7" />
+                <AllocationCard state={state} className="span-5" />
+                <AdviceCard state={state} />
+                {state.transactions.length === 0 && state.accounts.length > 0 && <FirstSteps onAdd={() => setComposer({ editId: null })} />}
+                <Holdings
+                  holdings={state.holdings}
+                  closed={state.closed}
+                  value={state.holdings_value}
+                  unrealized={state.holdings_unrealized}
+                  unrealizedSign={state.holdings_unrealized_sign}
+                  transactions={state.transactions}
+                  onEdit={edit}
+                />
+                <LoansCard state={state} className="span-12" />
+                {state.deposits.length + state.fx_positions.length > 0 ? (
+                  <>
+                    <DepositsFx state={state} className="span-6" />
+                    <Activity transactions={state.transactions} onEdit={edit} className="span-6" initial={8} />
+                  </>
+                ) : (
+                  <Activity transactions={state.transactions} onEdit={edit} className="span-12" initial={10} />
+                )}
+              </div>
+            )}
+            {view === 'money' && <MoneyView state={state} onEdit={edit} onPanel={setPanel} />}
+            {view === 'plan' && <PlanView state={state} />}
+          </main>
+        </FreshContext.Provider>
 
         {composer && (
           <Composer
@@ -211,19 +249,24 @@ export default function App() {
             open={composer}
             onClose={closeComposer}
             onSaved={(s, message) => {
+              const before = new Set(state.transactions.map(t => t.id));
+              const ids = s.transactions.filter(t => !before.has(t.id)).map(t => t.id);
+              if (composer.editId != null) ids.push(composer.editId);
+              setFresh(new Set(ids));
               setState(s);
               closeComposer();
-              setToast(message);
+              say(message);
             }}
           />
         )}
         {panel === 'accounts' && <AccountsPanel state={state} onState={setState} onClose={() => setPanel(null)} />}
         {panel === 'settings' && <SettingsPanel state={state} onState={setState} onClose={() => setPanel(null)} />}
         {panel === 'search' && <SearchPanel state={state} onEdit={editFromSearch} onClose={() => setPanel(null)} />}
-        {panel === 'recurring' && <RecurringPanel state={state} onState={setState} onToast={setToast} onClose={() => setPanel(null)} />}
+        {panel === 'recurring' && <RecurringPanel state={state} onState={setState} onToast={say} onClose={() => setPanel(null)} />}
         {toast && (
-          <div className="toast" role="status">
-            {toast}
+          <div key={toast.n} className={`toast ${toast.ok ? 'ok' : ''}`} role="status">
+            {toast.ok && <Icon name="check" size={16} />}
+            {toast.text}
           </div>
         )}
       </div>

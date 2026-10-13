@@ -212,6 +212,7 @@ kbd {
 }
 
 .views {
+  position: relative;
   display: flex;
   gap: 4px;
   background: var(--card-2);
@@ -219,7 +220,24 @@ kbd {
   padding: 3px;
 }
 
+/* The white block behind the current view; slides to it (--i is the view's index). The three
+   buttons have the same width, so one block width fits all. */
+.views-pill {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 14px) / 3);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+  transform: translateX(calc(var(--i, 0) * (100% + 4px)));
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 .views button {
+  position: relative;
+  flex: 1;
   border: 0;
   background: none;
   padding: 5px 16px;
@@ -236,8 +254,6 @@ kbd {
 .views button.on {
   color: var(--ink);
   font-weight: 600;
-  background: var(--card);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
 }
 
 .topbar-actions {
@@ -387,6 +403,33 @@ kbd {
 .card.hero .hero-chart {
   margin-top: auto;
   padding-top: 18px;
+}
+
+.card.hero .hero-note {
+  margin-top: auto;
+  padding-top: 18px;
+}
+
+/* A faint brass glow that follows the pointer (App sets --mx/--my); under the content. */
+.card.hero {
+  position: relative;
+  isolation: isolate;
+}
+
+.card.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(380px circle at var(--mx, 50%) var(--my, 0%), rgb(226 191 120 / 0.13), transparent 65%);
+  opacity: 0;
+  transition: opacity 0.35s;
+}
+
+.card.hero:hover::before {
+  opacity: 1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -785,6 +828,19 @@ button.trow:hover {
   border-radius: 3px;
 }
 
+/* Bars grow in from the left once, then follow value changes smoothly. */
+.meter > span,
+.budget-line span,
+.alloc-bar > span {
+  transform-origin: left center;
+  animation: grow-x 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transition: width 0.4s ease;
+}
+
+.band {
+  animation: reveal-x 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 .meter.over > span,
 .meter.near > span {
   background: var(--warn);
@@ -1116,6 +1172,11 @@ button.trow:hover {
 
 .chart .hit {
   fill: transparent;
+  transition: fill 0.15s;
+}
+
+.chart .hit.on {
+  fill: color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
 .chart .bar.main {
@@ -1125,6 +1186,23 @@ button.trow:hover {
 .chart .bar.quiet {
   fill: var(--brand-soft);
 }
+
+.chart .bar {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: grow-y 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
+
+.chart .ln.draw {
+  stroke-dasharray: 1;
+  animation: draw 0.7s ease-out both;
+}
+
+.chart .area-fill {
+  animation: fade 0.45s ease-out 0.4s both;
+}
+
 
 .sw {
   display: inline-block;
@@ -1245,6 +1323,22 @@ button.trow:hover {
   align-items: flex-start;
   padding: 72px 16px 16px;
   overflow-y: auto;
+}
+
+.scrim {
+  animation: fade 0.2s ease-out both;
+}
+
+.scrim.closing {
+  animation: fade-out 0.15s ease-in both;
+}
+
+.sheet {
+  animation: sheet-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.scrim.closing .sheet {
+  animation: sheet-out 0.15s ease-in both;
 }
 
 .sheet {
@@ -1568,6 +1662,12 @@ button.trow:hover {
 }
 
 .toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation:
+    toast-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+    toast-out 0.3s ease-in 2.3s forwards;
   position: fixed;
   left: 50%;
   bottom: 28px;
@@ -1662,8 +1762,10 @@ button.trow:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before {
     transition: none !important;
+    animation: none !important;
   }
 }
 
@@ -1736,6 +1838,11 @@ button.trow:hover {
 }
 
 .month-tabs > button:not(.quiet) {
+  transition:
+    background 0.18s,
+    border-color 0.18s,
+    color 0.18s,
+    transform 0.1s;
   display: grid;
   gap: 1px;
   min-width: 92px;
@@ -2148,4 +2255,169 @@ button.trow:hover {
   .rec-t .hide-sm {
     display: none;
   }
+}
+
+/* ── 動態與回饋 (DESIGN.md 2「動態與回饋」) ─────────────────── */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes reveal-x {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+
+@keyframes sheet-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+}
+
+@keyframes flash {
+  from {
+    background: color-mix(in srgb, var(--gold) 26%, transparent);
+  }
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Cards come in one after another when a view opens (a data refresh does not replay it). */
+.grid > * {
+  animation: rise 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.grid > :nth-child(2) {
+  animation-delay: 40ms;
+}
+.grid > :nth-child(3) {
+  animation-delay: 80ms;
+}
+.grid > :nth-child(4) {
+  animation-delay: 120ms;
+}
+.grid > :nth-child(5) {
+  animation-delay: 160ms;
+}
+.grid > :nth-child(6) {
+  animation-delay: 200ms;
+}
+.grid > :nth-child(7) {
+  animation-delay: 240ms;
+}
+.grid > :nth-child(n + 8) {
+  animation-delay: 280ms;
+}
+
+/* Pressed */
+.primary,
+.chip,
+.views button,
+.month-tabs > button {
+  transition: transform 0.1s;
+}
+.primary:active,
+.chip:active,
+.views button:active,
+.month-tabs > button:active {
+  transform: scale(0.97);
+}
+button.trow:active {
+  transform: scale(0.995);
+}
+
+.trow .icon-badge {
+  transition: background 0.15s;
+}
+.trow:hover .icon-badge {
+  background: color-mix(in srgb, currentColor 20%, transparent);
+}
+
+/* The entry just saved */
+.trow.fresh {
+  border-radius: 6px;
+  animation: flash 1.6s ease-out both;
+}
+
+.toast.ok .icon {
+  color: var(--gold-soft);
+}
+
+/* First load: card-shaped placeholders with a slow sheen */
+.card.skel {
+  min-height: 120px;
+  border-color: transparent;
+  box-shadow: none;
+  background: linear-gradient(100deg, var(--card) 40%, var(--card-2) 50%, var(--card) 60%) 0 0 / 200% 100%;
+  animation:
+    fade 0.3s both,
+    shimmer 1.6s linear infinite;
+}
+.card.skel.tall {
+  min-height: 300px;
 }

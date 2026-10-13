@@ -1,7 +1,7 @@
 import { type ReactNode, useContext, useEffect, useState } from 'react';
 import { api } from '../api';
 import { categoryIcon, IconBadge } from '../lib/icons';
-import { Money, PrivacyContext } from '../lib/privacy';
+import { Money, PrivacyContext, RollingMoney } from '../lib/privacy';
 import type { MonthReport, State } from '../types';
 import { TxList } from './Activity';
 import { PairBars } from './Charts';
@@ -131,7 +131,7 @@ function MonthView({
             <p className="label">{m.is_future ? `${m.label}的預算` : m.is_current ? '這個月花了' : `${m.label}花了`}</p>
             <h1 className="hero-num">
               <span className="ccy">NT$</span>
-              <Money value={m.is_future ? (m.budget ?? '—') : m.expense} />
+              <RollingMoney id="month-expense" value={m.is_future ? (m.budget ?? '—') : m.expense} />
             </h1>
           </div>
         </div>

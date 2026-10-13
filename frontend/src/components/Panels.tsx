@@ -1,28 +1,39 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { accountIcon, IconBadge } from '../lib/icons';
+import { useReducedMotion } from '../lib/motion';
 import { Money } from '../lib/privacy';
 import type { AccountInput, AccountRow, GroupInput, Settings, State } from '../types';
 
 export function Sheet({ title, onClose, children, wide = false }: { title: string; onClose(): void; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  const reduce = useReducedMotion();
+  const [closing, setClosing] = useState(false);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  // Esc, the scrim and 關閉 fade the sheet out first; callers that close it themselves (after saving) don't wait.
+  const requestClose = useCallback(() => {
+    if (reduce) return closeRef.current();
+    setClosing(true);
+    setTimeout(() => closeRef.current(), 150);
+  }, [reduce]);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     // Leave focus alone if a field inside (autoFocus) already took it.
     if (!ref.current?.contains(document.activeElement)) ref.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && requestClose();
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
       prev?.focus?.();
     };
-  }, [onClose]);
+  }, [requestClose]);
   return (
-    <div className="scrim" onMouseDown={e => e.target === e.currentTarget && onClose()}>
+    <div className={`scrim ${closing ? 'closing' : ''}`} onMouseDown={e => e.target === e.currentTarget && requestClose()}>
       <div className={`sheet ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref}>
         <header>
           <h2>{title}</h2>
-          <button type="button" className="quiet" onClick={onClose}>
+          <button type="button" className="quiet" onClick={requestClose}>
             關閉
           </button>
         </header>

@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 import { IconBadge, toneOf, txIcon } from '../lib/icons';
+import { FreshContext } from '../lib/motion';
 import { Money } from '../lib/privacy';
 import type { TxRow } from '../types';
 
@@ -54,6 +55,7 @@ export function TxList({ rows, onEdit, months = true }: { rows: TxRow[]; onEdit(
 
 /** One transaction: what happened on the first line, the details under it, amount on the right. */
 export function TxLine({ t, onEdit }: { t: TxRow; onEdit(id: number): void }) {
+  const fresh = useContext(FreshContext).has(t.id);
   let title: string;
   const sub: string[] = [];
   if (t.kind === 'transfer') {
@@ -74,7 +76,7 @@ export function TxLine({ t, onEdit }: { t: TxRow; onEdit(id: number): void }) {
   if (t.note) sub.push(t.note);
   const amount = t.kind === 'transfer' ? t.amount?.replace(/^−/, '') ?? null : t.amount;
   return (
-    <button type="button" className="trow" title="點一下修改" onClick={() => onEdit(t.id)}>
+    <button type="button" className={`trow ${fresh ? 'fresh' : ''}`} title="點一下修改" onClick={() => onEdit(t.id)}>
       <span className="date num">{t.date.slice(5).replace('-', '/')}</span>
       <span className="cell-ic">
         <IconBadge name={txIcon(t.kind, t.category)} tone={toneOf(t.kind)} />
