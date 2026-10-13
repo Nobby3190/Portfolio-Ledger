@@ -32,6 +32,7 @@ export interface ComposerOpen {
   editId: number | null;
   fields?: TxFields;
   quick?: boolean; // start in the one-line field
+  kind?: ComposerKind; // a new entry opened on this tab (e.g. 買進 from the empty 投資 card)
 }
 
 interface Props {
@@ -137,7 +138,7 @@ function missingFields(f: TxFields): string[] {
 
 export function Composer({ state, open, onClose, onSaved }: Props) {
   const [f, setF] = useState<TxFields>(() => {
-    const init = open.fields ?? blank(state);
+    const init = open.fields ?? blank(state, open.kind);
     // A debt opening is stored negative but typed as what is owed.
     const debt = init.opening && DEBT.includes(state.accounts.find(a => a.name === init.account)?.type ?? '');
     return debt ? { ...init, amount: init.amount.replace(/^-/, '') } : init;

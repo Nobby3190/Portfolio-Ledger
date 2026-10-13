@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import calendar
 import json
+import unicodedata
 from datetime import UTC, datetime
 from datetime import date as Date
 from decimal import Decimal
@@ -273,11 +274,15 @@ def set_total_budget(lg: Ledger, amount: str) -> None:
 
 
 def _amount(v: object, label: str) -> Decimal | None:
-    s = str(v or "").replace(",", "").strip()
+    # Full-width digits from the 注音 IME, thousands commas, 元/%, and a trailing 萬 (30萬 = 300,000).
+    s = unicodedata.normalize("NFKC", str(v or "")).replace(",", "").replace(" ", "").rstrip("元%")
     if not s:
         return None
+    scale = Decimal(1)
+    if s.endswith("萬"):
+        s, scale = s[:-1], Decimal(10000)
     try:
-        d = Decimal(s)
+        d = Decimal(s) * scale
     except Exception:
         raise FinanceError(f"{label}要是數字") from None
     if not d.is_finite() or d < 0:
@@ -475,7 +480,8 @@ def _life_plan(
 
 
 def save_life_plan(lg: Ledger, data: dict[str, Any]) -> int:
-    kind = str(data.get("kind") or "")
+    # The user names the plan; the kind is no longer chosen (2026-10-13), new plans are "other".
+    kind = str(data.get("kind") or "other")
     if kind not in LIFE_PLAN_KINDS:
         raise FinanceError("請選擇計劃類型")
     name = str(data.get("name", "")).strip()

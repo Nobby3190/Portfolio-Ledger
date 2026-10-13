@@ -215,17 +215,22 @@ export default function App() {
               <div className="grid">
                 <NetWorthCard state={state} className="span-7" />
                 <AllocationCard state={state} className="span-5" />
-                <AdviceCard state={state} />
                 {state.transactions.length === 0 && state.accounts.length > 0 && <FirstSteps onAdd={() => setComposer({ editId: null })} />}
+                {/* investments first: tracking them is one of the reasons for the app (2026-10-13) */}
                 <Holdings
                   holdings={state.holdings}
                   closed={state.closed}
                   value={state.holdings_value}
                   unrealized={state.holdings_unrealized}
                   unrealizedSign={state.holdings_unrealized_sign}
+                  dayChange={state.day_change}
+                  dayChangePct={state.day_change_pct}
+                  daySign={state.day_sign}
                   transactions={state.transactions}
                   onEdit={edit}
+                  onBuy={() => setComposer({ editId: null, kind: 'buy' })}
                 />
+                <AdviceCard state={state} />
                 <LoansCard state={state} className="span-12" />
                 {state.deposits.length + state.fx_positions.length > 0 ? (
                   <>

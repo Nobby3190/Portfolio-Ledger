@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { IconBadge, toneOf, txIcon } from '../lib/icons';
 import { Money } from '../lib/privacy';
 import type { Preview, RecurringFreq, RecurringInput, RecurringRule, State, TxRow } from '../types';
 import { TxList } from './Activity';
@@ -186,9 +187,22 @@ export function when(freq: RecurringFreq, start: string): string {
   return `每月 ${d.getDate()} 日${d.getDate() > 28 ? '（小月記在月底）' : ''}`;
 }
 
+// Filter groups for the panel: [key, label, rule kinds].
+const REC_GROUPS: [string, string, string[]][] = [
+  ['', '全部', []],
+  ['expense', '支出', ['expense']],
+  ['income', '收入', ['income']],
+  ['move', '轉帳與還款', ['transfer', 'repay']],
+  ['dca', '定期定額', ['dca']],
+];
+
+/** "約 15,300" for the monthly totals line. */
+const roughly = (n: number) => Math.round(n).toLocaleString('en-US');
+
 export function RecurringPanel({ state, onState, onClose, onToast }: { state: State; onState(s: State): void; onClose(): void; onToast(m: string): void }) {
   const [rules, setRules] = useState<RecurringRule[] | null>(null);
   const [editing, setEditing] = useState<RecurringInput | null>(null);
+  const [group, setGroup] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -197,12 +211,15 @@ export function RecurringPanel({ state, onState, onClose, onToast }: { state: St
 
   const open = (r: RecurringRule) =>
     setEditing({ id: r.id, line: r.line, freq: r.freq, start_date: r.start_date, end_date: r.end_date ?? '', active: r.active });
+  const back = () => {
+    setEditing(null);
+    setError(null);
+  };
 
   async function save(data: RecurringInput) {
     const r = await api.saveRecurring(data);
     if (!r.ok) return setError(r.error);
-    setError(null);
-    setEditing(null);
+    back();
     setRules(r.rules);
     onState(r.state);
     onToast(r.posted ? `已儲存，記入了 ${r.posted} 筆` : '已儲存');
@@ -211,54 +228,108 @@ export function RecurringPanel({ state, onState, onClose, onToast }: { state: St
   async function remove(id: number) {
     const r = await api.deleteRecurring(id);
     if (!r.ok) return setError(r.error);
-    setEditing(null);
+    back();
     setRules(r.rules);
     onState(r.state);
   }
 
-  return (
-    <Sheet title="週期性收支" onClose={onClose} wide>
-      <p className="lead">房租、薪水、訂閱、貸款、定期定額這類固定的收支，到日子會自動記一筆（定期定額用當天收盤價算股數）（app 沒開的日子，下次打開時補上）。金額不一樣的那個月，到紀錄裡點一下修改就好。</p>
-      {rules && rules.length > 0 && (
-        <div className="table rec-t">
-          {rules.map(r => (
-            <button key={r.id} type="button" className={`trow ${r.active ? '' : 'paused'}`} onClick={() => open(r)}>
-              <span className="cell">
-                <span className="ellipsis">{r.title}</span>
-                <span className={`sub ${r.error ? 'warn' : ''}`}>
-                  {r.error ? `記不進去：${r.error}` : `${when(r.freq, r.start_date)}${r.end_date ? `，到 ${r.end_date}` : ''}`}
-                </span>
-              </span>
-              <span className="cell r hide-sm">
-                <span className="small">{!r.active ? '暫停中' : r.next_date ? `下次 ${shortDate(r.next_date, state.today)}` : '已結束'}</span>
-              </span>
-              <span className="cell r">{r.amount ? <Money className="num" value={r.amount} /> : <span className="muted small">月付</span>}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      {rules && rules.length === 0 && !editing && <p className="muted">還沒有週期性收支。也可以在「記一筆」勾選「每月重複」。</p>}
-      {editing ? (
+  // Editing replaces the list, so the form is never far down the sheet.
+  if (editing) {
+    return (
+      <Sheet title={editing.id != null ? '修改週期性收支' : '新增週期性收支'} onClose={onClose} wide>
+        <button type="button" className="quiet back" onClick={back}>
+          ‹ 回到清單
+        </button>
         <RecurringForm
           key={editing.id ?? 'new'}
           initial={editing}
           today={state.today}
           error={error}
           onSave={save}
-          onCancel={() => {
-            setEditing(null);
-            setError(null);
-          }}
+          onCancel={back}
           onDelete={editing.id != null ? () => remove(editing.id!) : undefined}
         />
-      ) : (
-        <div className="actions">
-          <button type="button" className="primary" onClick={() => setEditing({ line: '', freq: 'monthly', start_date: state.today, end_date: '', active: true })}>
-            ＋ 新增週期性收支
-          </button>
-          {error && <p className="message bad">{error}</p>}
-        </div>
+      </Sheet>
+    );
+  }
+
+  const all = rules ?? [];
+  const groups = REC_GROUPS.filter(([k, , kinds]) => k === '' || all.some(r => kinds.includes(r.kind)));
+  const kinds = REC_GROUPS.find(([k]) => k === group)?.[2] ?? [];
+  const shown = group ? all.filter(r => kinds.includes(r.kind)) : all;
+  const sum = (ks: string[]) => shown.filter(r => ks.includes(r.kind)).reduce((t, r) => t + (r.monthly ?? 0), 0);
+  const totals = (
+    [
+      ['每月固定支出', sum(['expense', 'repay'])],
+      ['固定收入', sum(['income'])],
+      ['定期定額', sum(['dca'])],
+    ] as const
+  ).filter(([, v]) => v > 0);
+
+  return (
+    <Sheet title="週期性收支" onClose={onClose} wide>
+      <p className="lead">房租、薪水、訂閱、貸款、定期定額這類固定的收支，到日子會自動記一筆（定期定額用當天收盤價算股數）（app 沒開的日子，下次打開時補上）。金額不一樣的那個月，到紀錄裡點一下修改就好。</p>
+      {all.length > 0 && (
+        <>
+          {groups.length > 2 && (
+            <div className="seg rec-filter" role="radiogroup" aria-label="類型">
+              {groups.map(([k, label, ks]) => (
+                <button key={k} type="button" role="radio" aria-checked={group === k} className={group === k ? 'on' : ''} onClick={() => setGroup(k)}>
+                  {label}
+                  <span className="count">{k ? all.filter(r => ks.includes(r.kind)).length : all.length}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {totals.length > 0 && (
+            <p className="rec-totals">
+              {totals.map(([label, v]) => (
+                <span key={label}>
+                  {label} 約 <Money className="num strong" value={roughly(v)} />
+                </span>
+              ))}
+              <span className="muted small">每週、每年的換算成每月；暫停的不算</span>
+            </p>
+          )}
+          <div className="table rec-t">
+            <div className="thead" aria-hidden>
+              <span>名稱</span>
+              <span className="hide-sm">下次</span>
+              <span>金額</span>
+            </div>
+            {shown.map(r => (
+              <button key={r.id} type="button" className={`trow ${r.active ? '' : 'paused'}`} onClick={() => open(r)}>
+                <span className="cell-ic">
+                  <IconBadge name={txIcon(r.kind, r.category)} tone={toneOf(r.kind)} />
+                  <span className="cell">
+                    <span className="ellipsis">
+                      {r.title}
+                      {!r.active && <span className="rec-tag">暫停中</span>}
+                      {r.error && <span className="rec-tag warn">記不進去</span>}
+                    </span>
+                    <span className={`sub ${r.error ? 'warn' : ''}`}>
+                      {r.error
+                        ? r.error
+                        : [r.category, `${when(r.freq, r.start_date)}${r.end_date ? `，到 ${r.end_date}` : ''}`].filter(Boolean).join('・')}
+                    </span>
+                  </span>
+                </span>
+                <span className="cell r hide-sm">
+                  <span className="small">{!r.active ? '—' : r.next_date ? shortDate(r.next_date, state.today) : '已結束'}</span>
+                </span>
+                <span className="cell r">{r.amount ? <Money className="num" value={r.amount} /> : <span className="muted small">月付</span>}</span>
+              </button>
+            ))}
+          </div>
+        </>
       )}
+      {rules && rules.length === 0 && <p className="muted">還沒有週期性收支。也可以在「記一筆」勾選「每月重複」。</p>}
+      <div className="actions">
+        <button type="button" className="primary" onClick={() => setEditing({ line: '', freq: 'monthly', start_date: state.today, end_date: '', active: true })}>
+          ＋ 新增週期性收支
+        </button>
+        {error && <p className="message bad">{error}</p>}
+      </div>
     </Sheet>
   );
 }

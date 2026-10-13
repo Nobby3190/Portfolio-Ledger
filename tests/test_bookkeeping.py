@@ -375,3 +375,16 @@ def test_same_day_entries_recorded_before_the_opening_are_in_it(clock):
     assert bal(lg, "玉山") == "−2,140"
     lg.commit("存 -2040 期初 @玉山", edit_id=opening)  # editing keeps its place
     assert bal(lg, "玉山") == "−2,140"
+
+
+def test_recurring_rows_monthly_figures(lg):
+    recurring.save(lg, {"line": "支出 15000 居住 @台新 # 房租", "freq": "monthly", "start_date": "2026-10-20"})
+    recurring.save(lg, {"line": "支出 300 餐飲 # 早餐", "freq": "weekly", "start_date": "2026-10-20"})
+    recurring.save(lg, {"line": "收入 120000 獎金", "freq": "yearly", "start_date": "2026-12-20"})
+    recurring.save(lg, {"line": "支出 390 # Netflix", "freq": "monthly", "start_date": "2026-10-20", "active": False})
+    by = {r["title"]: r for r in recurring.rows(lg)}
+    assert by["房租"]["monthly"] == pytest.approx(15000) and by["房租"]["category"] == "居住"
+    assert by["早餐"]["monthly"] == pytest.approx(1300)  # 300 × 52 ÷ 12
+    bonus = next(r for r in by.values() if r["kind"] == "income")
+    assert bonus["monthly"] == pytest.approx(10000) and bonus["category"] == "獎金"
+    assert by["Netflix"]["monthly"] is None and by["Netflix"]["category"] == "其他"  # paused

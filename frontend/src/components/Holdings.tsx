@@ -9,32 +9,64 @@ interface Props {
   value: string;
   unrealized: string;
   unrealizedSign: number;
+  dayChange: string;
+  dayChangePct: string | null;
+  daySign: number;
   transactions: TxRow[];
   onEdit(id: number): void;
+  onBuy(): void;
 }
 
-export function Holdings({ holdings, closed, value, unrealized, unrealizedSign, transactions, onEdit }: Props) {
+/** 持股: first card under the totals, since tracking investments is what the app is for (2026-10-13). */
+export function Holdings({ holdings, closed, value, unrealized, unrealizedSign, dayChange, dayChangePct, daySign, transactions, onEdit, onBuy }: Props) {
   const [open, setOpen] = useState<string | null>(null);
   const [showClosed, setShowClosed] = useState(false);
-  if (holdings.length === 0 && closed.length === 0) return null;
+  if (holdings.length === 0 && closed.length === 0) {
+    return (
+      <section className="card span-12" aria-labelledby="holdings-h">
+        <header className="card-head">
+          <h2 id="holdings-h">投資</h2>
+          <button type="button" className="primary" onClick={onBuy}>
+            ＋ 記一筆買進
+          </button>
+        </header>
+        <p className="muted">記下買進的股票或 ETF 後，這裡會顯示每一檔的市值、損益和每天的漲跌。以前買的可以勾「補登過去買的股票」，不會再扣現金。</p>
+      </section>
+    );
+  }
   const txsOf = (ids: number[]) => transactions.filter(t => ids.includes(t.id));
+  const unrealizedPct = holdings.length > 0 ? pctOf(unrealized, value) : null;
 
   return (
     <section className="card span-12" aria-labelledby="holdings-h">
       <header className="card-head">
         <h2 id="holdings-h">持股</h2>
-        {holdings.length > 0 && (
-          <span className="aside">
-            <span>{holdings.length} 檔</span>
-            <span>
-              市值 <Money className="num" value={value} />
-            </span>
-            <span className={signClass(unrealizedSign)}>
-              未實現 <Money className="num" value={unrealized} />
-            </span>
-          </span>
-        )}
+        {holdings.length > 0 && <span className="aside">{holdings.length} 檔</span>}
       </header>
+      {holdings.length > 0 && (
+        <dl className="metrics holdings-metrics">
+          <div>
+            <dt>市值</dt>
+            <dd>
+              <Money className="num" value={value} />
+            </dd>
+          </div>
+          <div>
+            <dt>未實現損益</dt>
+            <dd className={signClass(unrealizedSign)}>
+              <Money className="num" value={unrealized} />
+              {unrealizedPct && <span className="num pct">{unrealizedPct}</span>}
+            </dd>
+          </div>
+          <div>
+            <dt>最近交易日漲跌</dt>
+            <dd className={signClass(daySign)}>
+              <Money className="num" value={dayChange} />
+              {dayChangePct && <span className="num pct">{dayChangePct}</span>}
+            </dd>
+          </div>
+        </dl>
+      )}
 
       {holdings.length > 0 && (
         <div className="table holdings-t">
@@ -168,4 +200,14 @@ export function Holdings({ holdings, closed, value, unrealized, unrealizedSign, 
       )}
     </section>
   );
+}
+
+/** Unrealized as a share of its cost basis: value − unrealized. "+12.3%"; null when it can't be told. */
+function pctOf(unrealized: string, value: string): string | null {
+  const n = (x: string) => Number(x.replace(/[^\d.−-]/g, '').replace('−', '-'));
+  const u = n(unrealized);
+  const cost = n(value) - u;
+  if (!Number.isFinite(u) || !(cost > 0)) return null;
+  const p = (u / cost) * 100;
+  return `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p).toFixed(2)}%`;
 }

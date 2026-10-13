@@ -298,7 +298,9 @@ export interface RecurringRule {
   line: string;
   title: string;
   kind: string;
+  category: string | null;
   amount: string | null;
+  monthly: number | null; // this rule per month (weekly ×52÷12, yearly ÷12); null when paused or no amount
   freq: RecurringFreq;
   freq_label: string;
   start_date: string;

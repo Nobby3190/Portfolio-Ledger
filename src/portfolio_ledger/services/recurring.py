@@ -9,6 +9,7 @@ import calendar
 import logging
 from datetime import date as Date
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 from .. import repo
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
     from .ledger import Ledger
 
 ACTIONS = ("income", "expense", "transfer", "repay", "dca")
+# One occurrence as a share of a month, for the panel's monthly totals.
+PER_MONTH = {"monthly": Decimal(1), "weekly": Decimal(52) / 12, "yearly": Decimal(1) / 12}
 log = logging.getLogger(__name__)
 
 
@@ -191,20 +194,37 @@ def delete(lg: Ledger, rule_id: int) -> None:
     repo.delete_recurring(lg.db, rule_id)
 
 
+def _figure(s: str | None) -> Decimal | None:
+    """The number in a formatted amount ("−15,000" → 15000)."""
+    digits = "".join(c for c in s or "" if c.isdigit() or c == ".")
+    try:
+        return Decimal(digits) if digits else None
+    except InvalidOperation:
+        return None
+
+
 def rows(lg: Ledger) -> list[dict[str, Any]]:
     """The rules for the 週期性收支 panel."""
     out = []
     for r in repo.list_recurring(lg.db):
         p = lg.preview(r.line)
         cmd = parse(r.line, lg.today())
-        title = cmd.note or (p.get("title") if p["status"] == "ready" else None) or r.line
+        amount = p.get("total") if p["status"] == "ready" else (fmt.money(cmd.amount) if cmd.amount else None)
+        each = _figure(amount)
+        category = cmd.category or {"expense": "其他", "income": "其他收入"}.get(cmd.action)
+        # No note: an income/expense rule is called by its category (薪資), others by the preview title.
+        named = category if cmd.action in ("income", "expense") and cmd.category else None
+        title = cmd.note or named or (p.get("title") if p["status"] == "ready" else None) or r.line
         out.append(
             {
                 "id": r.id,
                 "line": r.line,
                 "title": title,
                 "kind": cmd.action,
-                "amount": p.get("total") if p["status"] == "ready" else (fmt.money(cmd.amount) if cmd.amount else None),
+                "category": category,
+                "amount": amount,
+                # This rule's amount per month (weekly ×52÷12, yearly ÷12); paused rules count nothing.
+                "monthly": float(each * PER_MONTH[r.freq]) if each and r.active else None,
                 "freq": r.freq,
                 "freq_label": RECURRING_FREQS[r.freq],
                 "start_date": r.start_date,

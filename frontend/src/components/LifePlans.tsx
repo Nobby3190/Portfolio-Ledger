@@ -5,15 +5,10 @@ import type { LifePlan, LifePlanInput, Plan, State } from '../types';
 
 type Take = (r: { ok: true; plan: Plan } | { ok: false; error: string }) => void;
 
-const KINDS: [LifePlanInput['kind'], string][] = [
-  ['house', '買房'],
-  ['car', '買車'],
-  ['other', '其他大筆支出'],
-];
-
-// Nothing is preset: every number starts empty and only what is filled in gets calculated.
+// Nothing is preset: every number starts empty and only what is filled in gets calculated. The user
+// names the plan; there is no house/car type to pick any more (2026-10-13), new plans are 'other'.
 const EMPTY: LifePlanInput = {
-  kind: 'house',
+  kind: 'other',
   name: '',
   target_month: '',
   price: '',
@@ -33,20 +28,32 @@ const ym = (m: string) => `${m.slice(0, 4)}/${Number(m.slice(5))}`;
 /** 人生計劃: big purchases with their down payment progress and loan; feeds the FIRE projection. */
 export function LifePlans({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take }) {
   const [editing, setEditing] = useState<LifePlanInput | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const plans = plan.life_plans;
+  // Errors stay in the form, next to the button (they used to go to the top of the page).
+  const run = async (call: () => Promise<{ ok: true; plan: Plan } | { ok: false; error: string }>) => {
+    setSaving(true);
+    const r = await call();
+    setSaving(false);
+    if (!r.ok) return setFormError(r.error);
+    onPlan(r);
+    setFormError(null);
+    setEditing(null);
+  };
   return (
     <section className="card span-12" aria-labelledby="life-h">
       <header className="card-head">
         <h2 id="life-h">人生計劃</h2>
         {!editing && (
-          <button type="button" className="quiet" onClick={() => setEditing(EMPTY)}>
+          <button type="button" className="quiet" onClick={() => (setFormError(null), setEditing(EMPTY))}>
             新增計劃
           </button>
         )}
       </header>
       {plans.length === 0 && !editing && (
         <p className="muted">
-          買房、買車或其他大筆支出。只要填價格就能開始，其他像目標年月、頭期款、貸款，知道了再補；填了目標年月的計劃會放進下面的退休試算。
+          任何大筆支出，自己取名字：買房、換車、結婚、出國念書…只要填價格就能開始，其他像目標年月、頭期款、貸款，知道了再補；填了目標年月的計劃會放進下面的退休試算。
         </p>
       )}
       {plans.length > 0 && (
@@ -58,7 +65,7 @@ export function LifePlans({ plan, state, onPlan }: { plan: Plan; state: State; o
             <span>貸款月付</span>
           </div>
           {plans.map(p => (
-            <PlanRow key={p.id} p={p} onEdit={() => setEditing(p.input)} />
+            <PlanRow key={p.id} p={p} onEdit={() => (setFormError(null), setEditing(p.input))} />
           ))}
         </div>
       )}
@@ -67,21 +74,11 @@ export function LifePlans({ plan, state, onPlan }: { plan: Plan; state: State; o
           key={editing.id ?? 'new'}
           initial={editing}
           accounts={state.accounts.filter(a => !a.archived)}
+          error={formError}
+          saving={saving}
           onCancel={() => setEditing(null)}
-          onSave={async p => {
-            const r = await api.saveLifePlan(p);
-            onPlan(r);
-            if (r.ok) setEditing(null);
-          }}
-          onDelete={
-            editing.id != null
-              ? async () => {
-                  const r = await api.deleteLifePlan(editing.id!);
-                  onPlan(r);
-                  if (r.ok) setEditing(null);
-                }
-              : undefined
-          }
+          onSave={p => run(() => api.saveLifePlan(p))}
+          onDelete={editing.id != null ? () => run(() => api.deleteLifePlan(editing.id!)) : undefined}
         />
       )}
     </section>
@@ -93,7 +90,6 @@ function PlanRow({ p, onEdit }: { p: LifePlan; onEdit(): void }) {
     <button type="button" className={`trow ${p.active ? '' : 'archived'}`} onClick={onEdit}>
       <span className="cell">
         <span className="main">
-          <span className={`kind-tag kind-${p.kind}`}>{p.kind_label}</span>
           <span className="ellipsis">{p.name}</span>
         </span>
         <span className="sub ellipsis">
@@ -160,6 +156,8 @@ function PlanRow({ p, onEdit }: { p: LifePlan; onEdit(): void }) {
 function LifePlanForm(props: {
   initial: LifePlanInput;
   accounts: State['accounts'];
+  error: string | null;
+  saving: boolean;
   onSave(p: LifePlanInput): void;
   onCancel(): void;
   onDelete?: () => void;
@@ -182,17 +180,10 @@ function LifePlanForm(props: {
         props.onSave(p);
       }}
     >
-      <div className="seg" role="radiogroup" aria-label="類型">
-        {KINDS.map(([k, label]) => (
-          <button key={k} type="button" role="radio" aria-checked={p.kind === k} className={p.kind === k ? 'on' : ''} onClick={() => setP({ ...p, kind: k })}>
-            {label}
-          </button>
-        ))}
-      </div>
       <div className="form-row">
         <label>
           名稱
-          <input value={p.name} autoFocus onChange={set('name')} />
+          <input value={p.name} autoFocus onChange={set('name')} placeholder="例如：買房、換車、出國念書" />
         </label>
         <label>
           價格（今天的台幣）
@@ -229,9 +220,10 @@ function LifePlanForm(props: {
         <input type="checkbox" checked={p.active} onChange={e => setP({ ...p, active: e.target.checked })} />
         納入退休試算和健檢
       </label>
+      {props.error && <p className="message bad">{props.error}</p>}
       <div className="actions">
-        <button type="submit" className="primary">
-          {p.id != null ? '儲存計劃' : '建立計劃'}
+        <button type="submit" className="primary" disabled={props.saving}>
+          {props.saving ? '儲存中…' : p.id != null ? '儲存計劃' : '建立計劃'}
         </button>
         <button type="button" className="quiet" onClick={props.onCancel}>
           取消

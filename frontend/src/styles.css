@@ -711,6 +711,12 @@ button.trow:hover {
   min-width: 0;
 }
 
+.cell-ic .sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .icon {
   flex: none;
 }
@@ -2088,26 +2094,6 @@ button.trow:hover {
   --cols: minmax(0, 1fr) 210px 150px 170px;
 }
 
-.kind-tag {
-  flex: none;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 1px 8px;
-  border-radius: 999px;
-  color: var(--kc);
-  background: color-mix(in srgb, var(--kc) 14%, transparent);
-}
-
-.kind-house {
-  --kc: var(--inv-1);
-}
-.kind-car {
-  --kc: var(--inv-2);
-}
-.kind-other {
-  --kc: var(--inv-4);
-}
-
 .inline-form .seg {
   max-width: 420px;
 }
@@ -2183,7 +2169,7 @@ button.trow:hover {
 }
 
 .ycat-t {
-  --cols: minmax(0, 1fr) 110px 90px 150px 90px;
+  --cols: minmax(0, 1fr) 110px 90px 130px 90px;
 }
 
 .rec-t {
@@ -2193,6 +2179,58 @@ button.trow:hover {
 
 .rec-t .trow.paused {
   opacity: 0.55;
+}
+
+/* 週期性收支 panel: type filter, monthly totals, back link (DESIGN.md「週期性收支」) */
+.rec-filter {
+  margin-bottom: 12px;
+}
+
+.rec-filter .count {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.rec-totals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 20px;
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.rec-totals .muted {
+  margin-left: auto;
+}
+
+.rec-tag.warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
+.sheet .back {
+  margin: -4px 0 10px -8px;
+}
+
+/* 接下來 30 天 (收支, right column) */
+.soon-t {
+  --cols: 44px minmax(0, 1fr) auto;
+}
+
+.soon-t .date {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* 持股: the numbers row under the title */
+.holdings-metrics {
+  margin: 0 0 14px;
+  padding: 0 0 14px;
+  border-top: 0;
+  border-bottom: 1px solid var(--rule);
 }
 
 .search {

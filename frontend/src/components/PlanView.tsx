@@ -32,9 +32,10 @@ export function PlanView({ state }: { state: State }) {
   return (
     <div className="grid">
       {error && <p className="message bad span-12">{error}</p>}
-      <LifePlans plan={plan} state={state} onPlan={take} />
       <Goals plan={plan} state={state} onPlan={take} />
       <Rebalance plan={plan} onPlan={take} />
+      {/* right above the projection it feeds */}
+      <LifePlans plan={plan} state={state} onPlan={take} />
       <Fire plan={plan} onPlan={take} />
       <BacktestBlock />
     </div>
@@ -47,13 +48,26 @@ type Take = (r: { ok: true; plan: Plan } | { ok: false; error: string }) => void
 
 function Goals({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take }) {
   const [editing, setEditing] = useState<GoalInput | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const empty: GoalInput = { name: '', target: '', deadline: '', account_ids: [] };
+  // Errors stay in the form, next to the button: at the top of the page they went unseen and the
+  // form looked stuck (2026-10-13).
+  const run = async (call: () => Promise<{ ok: true; plan: Plan } | { ok: false; error: string }>) => {
+    setSaving(true);
+    const r = await call();
+    setSaving(false);
+    if (!r.ok) return setFormError(r.error);
+    onPlan(r);
+    setFormError(null);
+    setEditing(null);
+  };
   return (
     <section className="card stretch span-6" aria-labelledby="goals-h">
       <header className="card-head">
         <h2 id="goals-h">儲蓄目標</h2>
         {!editing && (
-          <button type="button" className="quiet" onClick={() => setEditing(empty)}>
+          <button type="button" className="quiet" onClick={() => (setFormError(null), setEditing(empty))}>
             新增目標
           </button>
         )}
@@ -73,7 +87,7 @@ function Goals({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take
               key={g.id}
               type="button"
               className="trow"
-              onClick={() => setEditing({ id: g.id, name: g.name, target: g.target_raw, deadline: g.deadline ?? '', account_ids: g.account_ids })}
+              onClick={() => (setFormError(null), setEditing({ id: g.id, name: g.name, target: g.target_raw, deadline: g.deadline ?? '', account_ids: g.account_ids }))}
             >
               <span className="cell">
                 <span className="ellipsis">{g.name}</span>
@@ -119,21 +133,11 @@ function Goals({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take
           key={editing.id ?? 'new'}
           initial={editing}
           accounts={state.accounts.filter(a => !a.archived)}
+          error={formError}
+          saving={saving}
           onCancel={() => setEditing(null)}
-          onSave={async g => {
-            const r = await api.saveGoal(g);
-            onPlan(r);
-            if (r.ok) setEditing(null);
-          }}
-          onDelete={
-            editing.id != null
-              ? async () => {
-                  const r = await api.deleteGoal(editing.id!);
-                  onPlan(r);
-                  if (r.ok) setEditing(null);
-                }
-              : undefined
-          }
+          onSave={g => run(() => api.saveGoal(g))}
+          onDelete={editing.id != null ? () => run(() => api.deleteGoal(editing.id!)) : undefined}
         />
       )}
     </section>
@@ -143,6 +147,8 @@ function Goals({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take
 function GoalForm(props: {
   initial: GoalInput;
   accounts: State['accounts'];
+  error: string | null;
+  saving: boolean;
   onSave(g: GoalInput): void;
   onCancel(): void;
   onDelete?: () => void;
@@ -165,7 +171,7 @@ function GoalForm(props: {
         </label>
         <label>
           目標金額（台幣）
-          <input value={g.target} inputMode="decimal" onChange={e => setG({ ...g, target: e.target.value })} placeholder="300000" />
+          <input value={g.target} inputMode="decimal" onChange={e => setG({ ...g, target: e.target.value })} placeholder="300000 或 30萬" />
         </label>
         <label>
           期限（可不填）
@@ -181,9 +187,10 @@ function GoalForm(props: {
           </label>
         ))}
       </fieldset>
+      {props.error && <p className="message bad">{props.error}</p>}
       <div className="actions">
-        <button type="submit" className="primary">
-          {g.id != null ? '儲存目標' : '建立目標'}
+        <button type="submit" className="primary" disabled={props.saving}>
+          {props.saving ? '儲存中…' : g.id != null ? '儲存目標' : '建立目標'}
         </button>
         <button type="button" className="quiet" onClick={props.onCancel}>
           取消

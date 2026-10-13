@@ -1,8 +1,8 @@
 import { type ReactNode, useContext, useEffect, useState } from 'react';
 import { api } from '../api';
-import { categoryIcon, IconBadge } from '../lib/icons';
+import { categoryIcon, IconBadge, toneOf, txIcon } from '../lib/icons';
 import { Money, PrivacyContext, RollingMoney } from '../lib/privacy';
-import type { MonthReport, State } from '../types';
+import type { MonthReport, RecurringRule, State } from '../types';
 import { TxList } from './Activity';
 import { PairBars } from './Charts';
 import { YearView } from './YearView';
@@ -44,18 +44,20 @@ export function MoneyView({ state, onEdit, onPanel }: { state: State; onEdit(id:
         />
       </div>
     );
-  return <MonthView state={state} onEdit={onEdit} month={month} setMonth={setMonth} bar={bar} />;
+  return <MonthView state={state} onEdit={onEdit} onPanel={onPanel} month={month} setMonth={setMonth} bar={bar} />;
 }
 
 function MonthView({
   state,
   onEdit,
+  onPanel,
   month,
   setMonth,
   bar,
 }: {
   state: State;
   onEdit(id: number): void;
+  onPanel(p: 'search' | 'recurring'): void;
   month: string | null;
   setMonth(m: string | null): void;
   bar: ReactNode;
@@ -296,7 +298,7 @@ function MonthView({
           </div>
         </section>
       )}
-
+      {m.is_current && <Upcoming state={state} onOpen={() => onPanel('recurring')} />}
       </div>
 
       {rows.length > 0 && (
@@ -351,5 +353,48 @@ export function InlineAmount({ label, value, onSave }: { label: string; value: s
         }
       }}
     />
+  );
+}
+
+/** 接下來 30 天: what the 週期性 rules will post soon, under 收入 on the current month. */
+function Upcoming({ state, onOpen }: { state: State; onOpen(): void }) {
+  const [rules, setRules] = useState<RecurringRule[]>([]);
+  useEffect(() => {
+    let live = true;
+    void api.recurring().then(r => live && r.ok && setRules(r.rules));
+    return () => {
+      live = false;
+    };
+  }, [state]);
+  const until = new Date(`${state.today}T00:00:00`);
+  until.setDate(until.getDate() + 30);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const end = `${until.getFullYear()}-${pad(until.getMonth() + 1)}-${pad(until.getDate())}`; // local date, not UTC
+  const soon = rules
+    .filter(r => r.active && r.next_date && r.next_date <= end)
+    .sort((a, b) => a.next_date!.localeCompare(b.next_date!));
+  if (soon.length === 0) return null;
+  return (
+    <section className="card" aria-labelledby="soon-h">
+      <header className="card-head">
+        <h2 id="soon-h">接下來 30 天</h2>
+        <button type="button" className="quiet" onClick={onOpen}>
+          週期性
+        </button>
+      </header>
+      <div className="table soon-t">
+        {soon.slice(0, 6).map(r => (
+          <button key={r.id} type="button" className="trow" onClick={onOpen}>
+            <span className="date num">{r.next_date!.slice(5).replace('-', '/')}</span>
+            <span className="cell-ic">
+              <IconBadge name={txIcon(r.kind, r.category)} tone={toneOf(r.kind)} />
+              <span className="ellipsis">{r.title}</span>
+            </span>
+            <span className="cell r">{r.amount ? <Money className="num" value={r.amount} /> : <span className="muted small">月付</span>}</span>
+          </button>
+        ))}
+      </div>
+      {soon.length > 6 && <p className="note">還有 {soon.length - 6} 筆</p>}
+    </section>
   );
 }

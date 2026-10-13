@@ -296,3 +296,18 @@ def test_future_months_until_december(lg):
         finance.month_report(lg, "2027-01")
     past = finance.month_report(lg, "2026-08")
     assert past["tabs"] == past["trend"] and not past["is_future"]
+
+
+def test_amounts_typed_with_the_chinese_ime(lg):
+    # 2026-10-13: a goal typed with full-width digits was rejected, and the error showed off-screen.
+    for target in ("３０００００", "30萬", "300,000 元", "３０萬"):
+        finance.save_goal(lg, {"name": target, "target": target, "account_ids": []})
+    assert [g["target"] for g in finance.plan(lg)["goals"]] == ["300,000"] * 4
+    with pytest.raises(finance.FinanceError, match="目標金額要是數字"):
+        finance.save_goal(lg, {"name": "x", "target": "三十萬"})
+
+
+def test_life_plan_without_a_kind(lg):
+    finance.save_life_plan(lg, {"name": "出國念書", "price": "1200000"})
+    row = finance.plan(lg)["life_plans"][0]
+    assert row["name"] == "出國念書" and row["kind"] == "other"
