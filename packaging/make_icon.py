@@ -1,6 +1,6 @@
 """Draw packaging/icon.png (1024x1024) with AppKit; scripts/make_icon.sh turns it into Ledger.icns.
 
-The app's own vocabulary on a navy ink tile: ledger entries (description left, amount right), the
+The app's own vocabulary on a slate ink tile: ledger entries (description left, amount right), the
 accountant's double rule, and under it the asset-allocation band from the dashboard as the total.
 Colours are the app's (frontend/src/styles.css): the same as the topbar's .brand-mark, so the Dock
 icon and the mark inside the window match.
@@ -17,12 +17,12 @@ def rgb(hex_: str, alpha: float = 1.0) -> K.NSColor:
     return K.NSColor.colorWithDeviceRed_green_blue_alpha_(r, g, b, alpha)
 
 
-INK_TOP = rgb("#2a3a66")  # .brand-mark gradient
-INK_BOTTOM = rgb("#121a30")
-IVORY = "#f4efe4"  # entries and the double rule
-SAPPHIRE_SOFT = "#a9bbe0"  # --brand-soft: the mark's second line
-# Allocation band: brass and sapphire as in the mark, then their soft tints.
-BAND = [rgb("#e2bf78"), rgb("#6f95e2"), rgb(SAPPHIRE_SOFT), rgb(IVORY)]
+INK_TOP = rgb("#3a4757")  # .brand-mark gradient
+INK_BOTTOM = rgb("#161b23")
+PAPER = "#eef2f6"  # entries and the double rule
+SLATE_SOFT = "#aebbc8"  # --brand-soft: the mark's second line
+# Allocation band: silver-blue and slate as in the mark, then their soft tints.
+BAND = [rgb("#c7d4e0"), rgb("#6f8aa3"), rgb(SLATE_SOFT), rgb(PAPER)]
 
 
 def bar(x: float, y: float, w: float, h: float, color: K.NSColor) -> None:
@@ -55,16 +55,16 @@ def rect(x: float, y: float, w: float, h: float, r: float, color: K.NSColor) -> 
 # Three ledger entries: a description on the left, its amount right-aligned.
 thick = 40
 for y, label_w, amount_w, color, alpha in (
-    (673, 236, 150, IVORY, 1.0),
-    (581, 300, 112, SAPPHIRE_SOFT, 1.0),
-    (489, 196, 168, SAPPHIRE_SOFT, 0.55),
+    (673, 236, 150, PAPER, 1.0),
+    (581, 300, 112, SLATE_SOFT, 1.0),
+    (489, 196, 168, SLATE_SOFT, 0.55),
 ):
     bar(left, y, label_w, thick, rgb(color, alpha))
     bar(right - amount_w, y, amount_w, thick, rgb(color, alpha))
 
 # The accountant's double rule under the column, then the total: the allocation band.
-rect(left, 433, width, 10, 5, rgb(IVORY, 0.9))
-rect(left, 413, width, 10, 5, rgb(IVORY, 0.9))
+rect(left, 433, width, 10, 5, rgb(PAPER, 0.9))
+rect(left, 413, width, 10, 5, rgb(PAPER, 0.9))
 band_y, band_h, gap = 301, 64, 12
 shares = (0.44, 0.27, 0.17, 0.12)
 x = left
