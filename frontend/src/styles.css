@@ -654,6 +654,42 @@ button.trow:hover {
   white-space: nowrap;
 }
 
+/* 圖示: a row's leading icon (account type or category), then its text column */
+.cell-ic {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cell-ic > :last-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.icon {
+  flex: none;
+}
+
+.icon-badge {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.icon-badge.expense {
+  color: var(--brand);
+}
+
+.icon-badge.income {
+  color: var(--gold);
+}
+
 .code {
   font-family: var(--num);
   font-weight: 600;
@@ -1152,6 +1188,9 @@ button.trow:hover {
 }
 
 .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--rule);
   background: var(--card);
   border-radius: 999px;
@@ -1576,6 +1615,18 @@ button.trow:hover {
   .card {
     padding: 14px 14px 16px;
   }
+  .icon-badge {
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+  }
+  .icon-badge .icon {
+    width: 16px;
+    height: 16px;
+  }
+  .cell-ic {
+    gap: 8px;
+  }
   .holdings-t {
     --cols: minmax(0, 1fr) 100px 110px;
   }
@@ -1638,7 +1689,7 @@ button.trow:hover {
 }
 
 .trow.sub-row {
-  padding: 6px 8px 6px 28px;
+  padding: 6px 8px 6px 46px; /* lines up with the group name, after its icon */
   font-size: 14px;
   border-bottom: 0;
 }

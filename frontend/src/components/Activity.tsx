@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { IconBadge, toneOf, txIcon } from '../lib/icons';
 import { Money } from '../lib/privacy';
 import type { TxRow } from '../types';
 
@@ -75,16 +76,19 @@ export function TxLine({ t, onEdit }: { t: TxRow; onEdit(id: number): void }) {
   return (
     <button type="button" className="trow" title="點一下修改" onClick={() => onEdit(t.id)}>
       <span className="date num">{t.date.slice(5).replace('-', '/')}</span>
-      <span className="cell">
-        <span className="ellipsis">
-          {title}
-          {t.recurring && (
-            <span className="rec-tag" title="週期性收支自動記入">
-              週期
-            </span>
-          )}
+      <span className="cell-ic">
+        <IconBadge name={txIcon(t.kind, t.category)} tone={toneOf(t.kind)} />
+        <span className="cell">
+          <span className="ellipsis">
+            {title}
+            {t.recurring && (
+              <span className="rec-tag" title="週期性收支自動記入">
+                週期
+              </span>
+            )}
+          </span>
+          {sub.length > 0 && <span className="sub ellipsis">{sub.join('　')}</span>}
         </span>
-        {sub.length > 0 && <span className="sub ellipsis">{sub.join('　')}</span>}
       </span>
       <span className="cell r">
         <span>

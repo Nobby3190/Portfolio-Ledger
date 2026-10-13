@@ -1,5 +1,6 @@
 import { type ReactNode, useContext, useEffect, useState } from 'react';
 import { api } from '../api';
+import { categoryIcon, IconBadge } from '../lib/icons';
 import { Money, PrivacyContext } from '../lib/privacy';
 import type { MonthReport, State } from '../types';
 import { TxList } from './Activity';
@@ -238,9 +239,12 @@ function MonthView({
               const r = c.budget_ratio;
               return (
                 <div key={c.id} className="trow">
-                  <span className="cell">
-                    <span className="ellipsis">{c.name}</span>
-                    {!m.is_future && <span className="sub">佔本月 {Math.round(c.share * 100)}%</span>}
+                  <span className="cell-ic">
+                    <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
+                    <span className="cell">
+                      <span className="ellipsis">{c.name}</span>
+                      {!m.is_future && <span className="sub">佔本月 {Math.round(c.share * 100)}%</span>}
+                    </span>
                   </span>
                   <span className="cell r">
                     <Money className="num" value={c.spent} />
@@ -280,7 +284,10 @@ function MonthView({
           <div className="table income-t">
             {m.income_categories.map(c => (
               <div key={c.name} className="trow">
-                <span>{c.name}</span>
+                <span className="cell-ic">
+                  <IconBadge name={categoryIcon(c.name, 'income')} tone="income" />
+                  <span className="ellipsis">{c.name}</span>
+                </span>
                 <span className="cell r">
                   <Money className="num" value={c.amount} />
                 </span>

@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { accountIcon, IconBadge } from '../lib/icons';
 import { Money } from '../lib/privacy';
 import type { AccountInput, AccountRow, GroupInput, Settings, State } from '../types';
 
@@ -87,11 +88,14 @@ export function AccountsPanel({ state, onState, onClose }: { state: State; onSta
       <div className="table acct-t">
         {singles.map(a => (
           <button key={a.id} type="button" className={`trow ${a.archived ? 'archived' : ''}`} onClick={() => editAccount(a)}>
-            <span className="cell">
-              <span className="ellipsis">{a.name}</span>
-              <span className="sub">
-                {a.type_label}　{a.currency}
-                {a.archived ? '　已封存' : ''}
+            <span className="cell-ic">
+              <IconBadge name={accountIcon(a.type)} />
+              <span className="cell">
+                <span className="ellipsis">{a.name}</span>
+                <span className="sub">
+                  {a.type_label}　{a.currency}
+                  {a.archived ? '　已封存' : ''}
+                </span>
               </span>
             </span>
             <span className="cell r">
@@ -119,10 +123,13 @@ export function AccountsPanel({ state, onState, onClose }: { state: State; onSta
                   setGroup({ name: g.name, old_name: g.name, type: g.type, currencies: g.currencies });
                 }}
               >
-                <span className="cell">
-                  <span className="ellipsis">{g.name}</span>
-                  <span className="sub">
-                    {state.account_types[g.type]}　{g.currencies.length} 種幣別{g.archived ? '　已封存' : ''}
+                <span className="cell-ic">
+                  <IconBadge name={accountIcon(g.type)} />
+                  <span className="cell">
+                    <span className="ellipsis">{g.name}</span>
+                    <span className="sub">
+                      {state.account_types[g.type]}　{g.currencies.length} 種幣別{g.archived ? '　已封存' : ''}
+                    </span>
                   </span>
                 </span>
                 <span className="cell r">

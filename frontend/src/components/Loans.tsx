@@ -1,4 +1,5 @@
 import { Money } from '../lib/privacy';
+import { IconBadge } from '../lib/icons';
 import type { State } from '../types';
 
 /** 貸款: what is still owed on each loan account, how much is repaid and when it ends. */
@@ -19,10 +20,13 @@ export function LoansCard({ state, className = '' }: { state: State; className?:
         </div>
         {state.loans.map(l => (
           <div key={l.id} className="trow">
-            <span className="cell">
-              <span className="ellipsis">{l.name}</span>
-              <span className="sub">
-                {l.done ? '已還清' : [l.rate && `年利率 ${l.rate}`, l.payoff && `預計 ${l.payoff.replace('-', '/')} 還清`].filter(Boolean).join('　') || '沒有填貸款條件'}
+            <span className="cell-ic">
+              <IconBadge name="loan" />
+              <span className="cell">
+                <span className="ellipsis">{l.name}</span>
+                <span className="sub">
+                  {l.done ? '已還清' : [l.rate && `年利率 ${l.rate}`, l.payoff && `預計 ${l.payoff.replace('-', '/')} 還清`].filter(Boolean).join('　') || '沒有填貸款條件'}
+                </span>
               </span>
             </span>
             <span className="bar-cell hide-sm">

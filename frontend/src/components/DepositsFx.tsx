@@ -1,4 +1,5 @@
 import { Money, signClass } from '../lib/privacy';
+import { IconBadge } from '../lib/icons';
 import type { State } from '../types';
 
 export function DepositsFx({ state, className = '' }: { state: State; className?: string }) {
@@ -17,11 +18,14 @@ export function DepositsFx({ state, className = '' }: { state: State; className?
         </div>
         {deposits.map(d => (
           <div key={d.id} className="trow">
-            <span className="cell">
-              <span className="ellipsis">{d.name}</span>
-              <span className="sub">
-                年利率 {d.rate ?? '未填'}
-                {d.maturity_date && `　${d.maturity_date} 到期`}
+            <span className="cell-ic">
+              <IconBadge name="hourglass" />
+              <span className="cell">
+                <span className="ellipsis">{d.name}</span>
+                <span className="sub">
+                  年利率 {d.rate ?? '未填'}
+                  {d.maturity_date && `　${d.maturity_date} 到期`}
+                </span>
               </span>
             </span>
             <span className={`cell r hide-sm ${d.matured || d.soon ? 'warn' : ''}`}>
@@ -40,13 +44,16 @@ export function DepositsFx({ state, className = '' }: { state: State; className?
         ))}
         {fx.map(f => (
           <div key={f.currency} className="trow">
-            <span className="cell">
-              <span className="main">
-                <span className="code">{f.currency}</span>
-                <span>{f.name}現金</span>
-              </span>
-              <span className="sub num">
-                {f.avg_rate ? `成本匯率 ${f.avg_rate}　現在 ${f.rate ?? '—'}` : f.rate ? `匯率 ${f.rate}` : '還沒有匯率'}
+            <span className="cell-ic">
+              <IconBadge name="globe" />
+              <span className="cell">
+                <span className="main">
+                  <span className="code">{f.currency}</span>
+                  <span>{f.name}現金</span>
+                </span>
+                <span className="sub num">
+                  {f.avg_rate ? `成本匯率 ${f.avg_rate}　現在 ${f.rate ?? '—'}` : f.rate ? `匯率 ${f.rate}` : '還沒有匯率'}
+                </span>
               </span>
             </span>
             <span className={`cell r hide-sm ${signClass(f.sign)}`}>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
+import { categoryIcon, Icon } from '../lib/icons';
 import { Money } from '../lib/privacy';
 import type { ComposerKind, MoreKind, Preview, State, TxFields } from '../types';
 import { Sheet } from './Panels';
@@ -365,11 +366,13 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
                   title={guess === c.name ? '依過去同樣備註的紀錄' : undefined}
                   onClick={() => set({ category: f.category === c.name ? '' : c.name })}
                 >
+                  <Icon name={categoryIcon(c.name, f.kind)} size={14} />
                   {c.name}
                 </button>
               ))}
               {guess && !shownCats.some(c => c.name === guess) && (
                 <button type="button" className="chip guess" onClick={() => set({ category: guess })}>
+                  <Icon name={categoryIcon(guess, f.kind)} size={14} />
                   {guess}
                 </button>
               )}

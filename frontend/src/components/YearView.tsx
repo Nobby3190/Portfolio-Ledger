@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { categoryIcon, IconBadge } from '../lib/icons';
 import { Money, signClass } from '../lib/privacy';
 import type { State, YearChange, YearReport } from '../types';
 import { PairBars } from './Charts';
@@ -127,9 +128,12 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
             </div>
             {y.categories.map(c => (
               <div key={c.id} className="trow">
-                <span className="cell">
-                  <span className="ellipsis">{c.name}</span>
-                  <span className="sub">佔 {Math.round(c.share * 100)}%</span>
+                <span className="cell-ic">
+                  <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
+                  <span className="cell">
+                    <span className="ellipsis">{c.name}</span>
+                    <span className="sub">佔 {Math.round(c.share * 100)}%</span>
+                  </span>
                 </span>
                 <span className="cell r">
                   <Money className="num" value={c.amount} />
@@ -196,9 +200,12 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
             <div className="table income-t">
               {y.income_categories.map(c => (
                 <div key={c.name} className="trow">
-                  <span className="cell">
-                    <span>{c.name}</span>
-                    <span className="sub">佔 {Math.round(c.share * 100)}%</span>
+                  <span className="cell-ic">
+                    <IconBadge name={categoryIcon(c.name, 'income')} tone="income" />
+                    <span className="cell">
+                      <span className="ellipsis">{c.name}</span>
+                      <span className="sub">佔 {Math.round(c.share * 100)}%</span>
+                    </span>
                   </span>
                   <span className="cell r">
                     <Money className="num" value={c.amount} />
