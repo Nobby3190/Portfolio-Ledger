@@ -55,8 +55,12 @@ export interface GoalInput {
   name: string;
   target: string;
   deadline: string;
-  account_ids: number[];
+  scope: GoalScope;
+  account_ids: number[]; // used when scope is 'accounts'
 }
+
+/** What a savings goal counts (DESIGN.md 規劃視圖「追蹤範圍」). */
+export type GoalScope = 'cash' | 'cash_deposit' | 'total' | 'accounts';
 
 let ready: Promise<PyApi> | null = null;
 

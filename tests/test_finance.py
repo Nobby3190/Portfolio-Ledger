@@ -6,6 +6,7 @@ import pytest
 
 from portfolio_ledger import repo
 from portfolio_ledger.db import Db
+from portfolio_ledger.models import Security
 from portfolio_ledger.services import finance
 from portfolio_ledger.services.ledger import EntryError, Ledger
 
@@ -307,7 +308,39 @@ def test_amounts_typed_with_the_chinese_ime(lg):
         finance.save_goal(lg, {"name": "x", "target": "三十萬"})
 
 
+def test_raw_amounts_for_editing_are_plain_numbers(lg):
+    # 2026-10-14: opening a 9000 budget to edit it showed "9E+3" (str() of a normalized Decimal).
+    food = next(c for c in repo.list_categories(lg.db, "expense") if c.name == "餐飲")
+    finance.set_budget(lg, food.id, "9000")
+    rows = {r["name"]: r for r in finance.month_report(lg, "2026-10")["categories"]}
+    assert rows["餐飲"]["budget_raw"] == "9000"
+    finance.save_goal(lg, {"name": "換車", "target": "30萬", "account_ids": []})
+    assert finance.plan(lg)["goals"][0]["target_raw"] == "300000"
+
+
 def test_life_plan_without_a_kind(lg):
     finance.save_life_plan(lg, {"name": "出國念書", "price": "1200000"})
     row = finance.plan(lg)["life_plans"][0]
     assert row["name"] == "出國念書" and row["kind"] == "other"
+
+
+def test_goal_scopes(lg):
+    # 2026-10-13: an emergency fund counted the stocks too. 現金與活存 counts TWD cash only.
+    lg.commit("存 100000 期初 @台新 2026-09-01")
+    lg.commit("存 50000 期初 @永豐 2026-09-01")
+    repo.upsert_securities(lg.db, [Security("0050", "元大台灣50", "TWSE", "TWD", "etf", D(100), D(100), "2026-10-10")])
+    lg.commit("買 0050 300 100 @永豐 2026-09-02")  # 30,000 of the broker cash becomes stock
+    lg.commit("轉 40000 @台新 @一年定存 2026-09-03")
+    for scope in ("cash", "cash_deposit", "total"):
+        finance.save_goal(lg, {"name": scope, "target": "1000000", "scope": scope})
+    finance.save_goal(lg, {"name": "永豐", "target": "1000000", "scope": "accounts", "account_ids": [2]})
+    got = {g["name"]: g for g in finance.plan(lg)["goals"]}
+    buy = next(t for t in repo.list_txs(lg.db) if t.kind == "buy")
+    broker_cash = D(50000) + buy.amount  # the purchase and its fee leave the broker cash
+    assert D(got["cash"]["current"].replace(",", "")) == D(60000) + broker_cash
+    assert D(got["cash_deposit"]["current"].replace(",", "")) > D(got["cash"]["current"].replace(",", "")) + D(39999)
+    assert got["total"]["current"] == lg.state()["total"]
+    assert D(got["永豐"]["current"].replace(",", "")) > broker_cash  # an account counts its stocks
+    assert got["cash"]["scope_label"] == "現金與活存" and got["永豐"]["accounts"] == ["永豐"]
+    with pytest.raises(finance.FinanceError, match="勾選"):
+        finance.save_goal(lg, {"name": "x", "target": "1", "scope": "accounts"})

@@ -51,6 +51,7 @@ class Account:
     principal: Decimal | None = None  # loans: amount borrowed, term and grace period (rate/start_date shared)
     term_years: Decimal | None = None
     grace_years: Decimal | None = None
+    color: str | None = None  # '#rrggbb' picked by hand; None = from the bank/broker in the name
 
 
 @dataclass
@@ -69,8 +70,13 @@ class Goal:
     name: str
     target: Decimal
     deadline: str | None = None
-    account_ids: list[int] | None = None  # None/empty: the whole net worth
+    account_ids: list[int] | None = None  # used when scope is "accounts"
     sort: int = 0
+    scope: str = "total"  # a key of GOAL_SCOPES
+
+
+# What a savings goal counts (DESIGN.md 規劃視圖「追蹤範圍」).
+GOAL_SCOPES = {"cash": "現金與活存", "cash_deposit": "現金＋定存", "total": "總資產", "accounts": "自訂帳戶"}
 
 
 LIFE_PLAN_KINDS = {"house": "買房", "car": "買車", "other": "其他大筆支出"}

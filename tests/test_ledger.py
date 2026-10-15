@@ -122,6 +122,19 @@ def test_account_rules(ledger):
         ledger.delete_account(1)
 
 
+def test_account_color(ledger):
+    acc_id = ledger.save_account({"name": "玉山", "type": "credit", "color": "#00857C"})
+    ledger.save_group({"name": "外幣", "type": "bank", "currencies": ["USD", "JPY"], "color": "#4a6178"})
+    s = ledger.state()
+    assert next(a for a in s["accounts"] if a["id"] == acc_id)["color"] == "#00857c"
+    assert {a["color"] for a in s["accounts"] if a["group_name"] == "外幣"} == {"#4a6178"}
+    assert next(g for g in s["account_groups"] if g["name"] == "外幣")["color"] == "#4a6178"
+    ledger.save_account({"id": acc_id, "name": "玉山", "type": "credit", "color": ""})  # back to automatic
+    assert next(a for a in ledger.state()["accounts"] if a["id"] == acc_id)["color"] is None
+    with pytest.raises(EntryError, match="顏色"):
+        ledger.save_account({"name": "台新", "type": "bank", "color": "red"})
+
+
 def test_future_date_rejected(ledger):
     assert "未來" in ledger.preview("存 5 2026-12-01 @永豐")["message"]
 

@@ -1,6 +1,6 @@
 import { useContext, useEffect, useState } from 'react';
-import { api, type GoalInput } from '../api';
-import { Money, PrivacyContext, signClass } from '../lib/privacy';
+import { api, type GoalInput, type GoalScope } from '../api';
+import { Money, PrivacyContext, signClass, Trend } from '../lib/privacy';
 import type { BacktestResult, Plan, PlanParams, State } from '../types';
 import { LineChart } from './Charts';
 import { LifePlans } from './LifePlans';
@@ -50,7 +50,7 @@ function Goals({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take
   const [editing, setEditing] = useState<GoalInput | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const empty: GoalInput = { name: '', target: '', deadline: '', account_ids: [] };
+  const empty: GoalInput = { name: '', target: '', deadline: '', scope: 'cash', account_ids: [] };
   // Errors stay in the form, next to the button: at the top of the page they went unseen and the
   // form looked stuck (2026-10-13).
   const run = async (call: () => Promise<{ ok: true; plan: Plan } | { ok: false; error: string }>) => {
@@ -73,7 +73,7 @@ function Goals({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take
         )}
       </header>
       {plan.goals.length === 0 && !editing && (
-        <p className="muted">例如「緊急預備金 30 萬」或「買房頭期款 300 萬，2030 年前」。可以指定追蹤哪些帳戶，不指定就看總資產。</p>
+        <p className="muted">例如「緊急預備金 30 萬」或「買房頭期款 300 萬，2030 年前」。可以選要算現金、現金＋定存、總資產，或自己挑帳戶。</p>
       )}
       {plan.goals.length > 0 && (
         <div className="table goal-t">
@@ -87,12 +87,12 @@ function Goals({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take
               key={g.id}
               type="button"
               className="trow"
-              onClick={() => (setFormError(null), setEditing({ id: g.id, name: g.name, target: g.target_raw, deadline: g.deadline ?? '', account_ids: g.account_ids }))}
+              onClick={() => (setFormError(null), setEditing({ id: g.id, name: g.name, target: g.target_raw, deadline: g.deadline ?? '', scope: g.scope, account_ids: g.account_ids }))}
             >
               <span className="cell">
                 <span className="ellipsis">{g.name}</span>
                 <span className="sub ellipsis">
-                  {g.accounts.length ? g.accounts.join('、') : '看總資產'}
+                  {g.scope === 'accounts' ? g.accounts.join('、') : g.scope_label}
                   {g.deadline && `　${g.deadline} 前`}
                 </span>
               </span>
@@ -144,6 +144,13 @@ function Goals({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take
   );
 }
 
+const SCOPES: [GoalScope, string, string][] = [
+  ['cash', '現金與活存', '台幣的銀行、現金帳戶，加上證券帳戶裡的交割款（不含股票）；新開的帳戶會自動算進去。適合緊急預備金'],
+  ['cash_deposit', '現金＋定存', '現金與活存，再加上台幣定存'],
+  ['total', '總資產', '和首頁的總資產一樣：含股票，扣掉信用卡和貸款'],
+  ['accounts', '自訂帳戶', '自己勾帳戶；外幣存款要算進去時用這個'],
+];
+
 function GoalForm(props: {
   initial: GoalInput;
   accounts: State['accounts'];
@@ -178,15 +185,28 @@ function GoalForm(props: {
           <input type="date" value={g.deadline} onChange={e => setG({ ...g, deadline: e.target.value })} />
         </label>
       </div>
-      <fieldset className="checks">
-        <legend>追蹤哪些帳戶（不選＝總資產）</legend>
-        {props.accounts.map(a => (
-          <label key={a.id} className="check">
-            <input type="checkbox" checked={g.account_ids.includes(a.id)} onChange={() => toggle(a.id)} />
-            {a.name}
-          </label>
-        ))}
-      </fieldset>
+      <div className="field">
+        <span className="field-label">追蹤範圍</span>
+        <div className="seg" role="radiogroup" aria-label="追蹤範圍">
+          {SCOPES.map(([k, label]) => (
+            <button key={k} type="button" role="radio" aria-checked={g.scope === k} className={g.scope === k ? 'on' : ''} onClick={() => setG({ ...g, scope: k })}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <small className="muted">{SCOPES.find(([k]) => k === g.scope)?.[2]}</small>
+      </div>
+      {g.scope === 'accounts' && (
+        <fieldset className="checks">
+          <legend>追蹤哪些帳戶（帳戶的金額＝現金＋持股市值）</legend>
+          {props.accounts.map(a => (
+            <label key={a.id} className="check">
+              <input type="checkbox" checked={g.account_ids.includes(a.id)} onChange={() => toggle(a.id)} />
+              {a.name}
+            </label>
+          ))}
+        </fieldset>
+      )}
       {props.error && <p className="message bad">{props.error}</p>}
       <div className="actions">
         <button type="submit" className="primary" disabled={props.saving}>
@@ -257,8 +277,9 @@ function Rebalance({ plan, onPlan }: { plan: Plan; onPlan: Take }) {
               {r.trade_sign === 0 ? (
                 <span className="muted">剛好</span>
               ) : (
-                <span>
-                  {r.trade_sign > 0 ? '買進 ' : '賣出 '}
+                <span className="trend-line">
+                  <Trend sign={r.trade_sign} />
+                  {r.trade_sign > 0 ? '買進' : '賣出'}
                   <Money className="num" value={r.trade.replace(/^[+−]/, '')} />
                 </span>
               )}
@@ -460,6 +481,7 @@ function BacktestBlock() {
             {result.name}：從 {result.from} 起 {result.months} 個月，投入 <Money className="num" value={result.invested} />，現在值{' '}
             <Money className="num strong" value={result.value} /> {result.currency !== 'TWD' && result.currency}，
             <span className={signClass(result.gain_sign)}>
+              <Trend sign={result.gain_sign} />
               <Money className="num" value={result.gain} />（{result.return_pct}）
             </span>
             {result.xirr && <>，年化 {result.xirr}</>}。

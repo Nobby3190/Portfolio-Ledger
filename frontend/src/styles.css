@@ -137,6 +137,23 @@ select {
   color: var(--green);
 }
 
+/* Up/down arrows beside changes (DESIGN.md 2「漲跌箭頭」). */
+.trend-arrow {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trend-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
 .warn {
   color: var(--warn);
 }
@@ -617,6 +634,23 @@ kbd {
 
 .metrics .pct {
   font-size: 14px;
+}
+
+.metrics dd > .trend-arrow {
+  align-self: center;
+}
+
+/* Billow-style change badge: arrow + %, tinted with the gain/loss colour. */
+.metrics .pct.trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  align-self: center;
+  padding: 1px 7px 1px 5px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  background: color-mix(in srgb, currentColor 13%, transparent);
 }
 
 /* ── tables (aligned columns) ─────────────────────────────── */
@@ -1374,21 +1408,297 @@ button.trow:hover {
   margin: 0 0 12px;
 }
 
+.sheet.xwide {
+  width: min(920px, 100%);
+}
+
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── 帳戶 (DESIGN.md 2「帳戶」): wide list, type filter, a colour per bank/broker ── */
+
+.acct-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 12px;
+}
+
+.acct-filter {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.acct-filter button {
+  flex: none;
+  padding: 6px 12px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.acct-filter .count {
+  font-size: 12px;
+  color: var(--faint);
+  margin-left: 2px;
+}
+
+.acct-filter button.on .count {
+  color: var(--muted);
+}
+
 .acct-t {
-  --cols: minmax(0, 1fr) auto;
+  --cols: minmax(0, 1fr) 96px 64px 150px 140px;
+  margin-top: 6px;
+}
+
+.acct-t .thead > :nth-child(2),
+.acct-t .thead > :nth-child(3) {
+  text-align: left;
+}
+
+/* The bank/broker colour: a bar at the start of the row. */
+.trow.acct-row {
+  box-shadow: inset 4px 0 0 var(--acct);
+  padding-left: 16px;
+}
+
+.acct-group .trow.sub-row {
+  padding-left: 54px; /* lines up with the group name, after the bar and icon */
+  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--acct) 35%, transparent);
+}
+
+.show-sm {
+  display: none;
+}
+
+.note.warn {
+  color: var(--warn);
+}
+
+.empty {
+  margin: 0;
+  padding: 16px 8px;
+}
+
+.actions.end {
+  justify-content: flex-end;
+}
+
+.step-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 4px 0 12px;
+}
+
+.kind-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.kind-tile,
+.inst-tile {
+  border: 1px solid var(--rule);
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.kind-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 14px;
+  border-radius: 10px;
+}
+
+.kind-tile .icon {
+  color: var(--brand);
+  margin-bottom: 6px;
+}
+
+.kind-tile .sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.inst-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.inst-tile {
+  padding: 10px 12px 10px 16px;
+  border-radius: 8px;
+  font-size: 15px;
+  box-shadow: inset 4px 0 0 var(--acct);
+}
+
+.inst-tile.other {
+  box-shadow: none;
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.kind-tile:hover,
+.inst-tile:hover {
+  border-color: var(--muted);
+  background: var(--card-2);
+}
+
+.acct-form {
+  max-width: 600px;
+}
+
+.field-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.form .field-head label {
+  display: inline;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.swatch {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--card);
+  background: var(--sw);
+  box-shadow: 0 0 0 1px var(--rule);
+  cursor: pointer;
+}
+
+.swatch.auto {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 6px;
+  border-radius: 999px;
+  background: var(--card-2);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.swatch.auto::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--sw);
+}
+
+.swatch.on {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+/* 「?」: help text kept out of the way until asked for */
+.help-tip {
+  position: relative;
+  display: inline-flex;
+}
+
+.help-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--rule);
+  background: var(--card-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.help-btn:hover,
+.help-btn[aria-expanded='true'] {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+
+.help-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: -8px;
+  z-index: 5;
+  width: min(340px, 80vw);
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: var(--shadow), 0 4px 16px rgb(0 0 0 / 0.12);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: var(--ink-2);
+  text-align: left;
+}
+
+.field-head .help-pop {
+  left: -8px;
+  right: auto;
+}
+
+.help-pop b {
+  display: block;
+  color: var(--ink);
+  margin-top: 8px;
+}
+
+.help-pop b:first-child {
+  margin-top: 0;
+}
+
+.help-pop code {
+  font-size: 12px;
+  background: var(--card-2);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+@media (max-width: 760px) {
+  .acct-t {
+    --cols: minmax(0, 1fr) auto;
+  }
+  .acct-t .hide-sm {
+    display: none;
+  }
+  .acct-t .show-sm {
+    display: inline;
+  }
+  .kind-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .trow.archived {
   opacity: 0.55;
 }
 
-.presets {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  flex-wrap: wrap;
-}
 
 .form {
   display: grid;

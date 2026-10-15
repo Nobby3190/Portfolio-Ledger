@@ -223,9 +223,13 @@ export default function App() {
                   value={state.holdings_value}
                   unrealized={state.holdings_unrealized}
                   unrealizedSign={state.holdings_unrealized_sign}
+                  unrealizedPct={state.holdings_unrealized_pct}
                   dayChange={state.day_change}
                   dayChangePct={state.day_change_pct}
                   daySign={state.day_sign}
+                  totalReturn={state.total_return}
+                  totalReturnPct={state.total_return_pct}
+                  returnSign={state.return_sign}
                   transactions={state.transactions}
                   onEdit={edit}
                   onBuy={() => setComposer({ editId: null, kind: 'buy' })}

@@ -145,6 +145,15 @@ class Ledger:
             raise EntryError("帳戶名稱不能有空白、@ 或 #（一行輸入要用 @名稱 指定帳戶）")
         return name
 
+    @staticmethod
+    def _valid_color(raw: object) -> str | None:
+        color = str(raw or "").strip().lower()
+        if not color:
+            return None
+        if not re.fullmatch(r"#[0-9a-f]{6}", color):
+            raise EntryError("顏色要是 #rrggbb")
+        return color
+
     def save_group(self, data: dict[str, Any]) -> None:
         """Create or update a multi-currency account: one part per currency, named "{name}-{CUR}".
 
@@ -155,6 +164,7 @@ class Ledger:
         type_ = data.get("type") or "bank"
         if type_ not in ("bank", "cash", "broker_us"):
             raise EntryError("多幣別帳戶只能是銀行、現金或複委託")
+        color = self._valid_color(data.get("color"))
         currencies = sorted({str(c).upper() for c in data.get("currencies") or []})
         if not currencies:
             raise EntryError("至少要選一種幣別")
@@ -169,7 +179,7 @@ class Ledger:
             raise EntryError(f"已經有叫「{name}」的帳戶")
         by_cur = {a.currency: a for a in parts}
         for a in parts:  # rename / restore / retire existing parts
-            a.name, a.group_name, a.type = f"{name}-{a.currency}", name, type_
+            a.name, a.group_name, a.type, a.color = f"{name}-{a.currency}", name, type_, color
             if a.currency in currencies:
                 a.archived = False
                 repo.save_account(self.db, a)
@@ -181,7 +191,7 @@ class Ledger:
                 repo.delete_account(self.db, a.id or 0)
         for c in currencies:
             if c not in by_cur:
-                repo.save_account(self.db, Account(None, f"{name}-{c}", type_, c, group_name=name))
+                repo.save_account(self.db, Account(None, f"{name}-{c}", type_, c, group_name=name, color=color))
 
     def delete_group(self, name: str) -> None:
         parts = [a for a in repo.list_accounts(self.db, True) if a.group_name == name]
@@ -219,6 +229,7 @@ class Ledger:
             archived=bool(data.get("archived", False)),
             sort=int(data.get("sort", 0)),
             group_name=old.group_name if acc_id is not None and old is not None else None,
+            color=self._valid_color(data.get("color")),
         )
         if type_ == "deposit":
             acc.rate = _optional_positive(data.get("rate"), "年利率")
@@ -1369,6 +1380,7 @@ class Ledger:
                 "term_years": str(a.term_years) if a.term_years is not None else None,
                 "grace_years": str(a.grace_years) if a.grace_years is not None else None,
                 "archived": a.archived,
+                "color": a.color,
             }
             for a, bal, held in v["accounts"]
         ]
@@ -1389,6 +1401,9 @@ class Ledger:
             "holdings_value": fmt.money(sum((h["value_twd"] for h in v["open"]), ZERO)),
             "holdings_unrealized": fmt.money(sum((h["unrealized_twd"] for h in v["open"]), ZERO), signed=True),
             "holdings_unrealized_sign": fmt.sign(sum((h["unrealized_twd"] for h in v["open"]), ZERO)),
+            "holdings_unrealized_pct": fmt.pct(
+                sum((h["unrealized_twd"] for h in v["open"]), ZERO), sum((h["cost_twd"] for h in v["open"]), ZERO)
+            ),
             "closed": closed,
             "transactions": txs,
             "categories": self._categories(v["txs"]),
@@ -1462,7 +1477,7 @@ class Ledger:
         for a, _, _ in v["accounts"]:
             if not a.group_name:
                 continue
-            g = groups.setdefault(a.group_name, {"name": a.group_name, "type": a.type, "currencies": [], "total": ZERO})
+            g = groups.setdefault(a.group_name, {"name": a.group_name, "type": a.type, "color": a.color, "currencies": [], "total": ZERO})
             if not a.archived:
                 g["currencies"].append(a.currency)
             g["total"] += v["acc_value_twd"].get(a.id or 0, ZERO)

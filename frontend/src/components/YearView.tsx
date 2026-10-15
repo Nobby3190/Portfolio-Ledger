@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { categoryIcon, IconBadge } from '../lib/icons';
-import { Money, RollingMoney, signClass } from '../lib/privacy';
+import { Money, RollingMoney, signClass, Trend } from '../lib/privacy';
 import type { State, YearChange, YearReport } from '../types';
 import { PairBars } from './Charts';
 
@@ -66,7 +66,8 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
             <dd>
               <Money className="num" value={y.income} />
               {y.vs_last.income && (
-                <span className="delta">
+                <span className="delta trend-line">
+                  <Trend sign={y.vs_last.income.sign} />
                   <Money value={y.vs_last.income.delta} />
                 </span>
               )}
@@ -75,6 +76,7 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
           <div>
             <dt>結餘</dt>
             <dd>
+              <Trend sign={y.net_sign} />
               <Money className="num" value={y.net} />
             </dd>
           </div>
@@ -154,7 +156,14 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
                   )}
                 </span>
                 <span className="cell r hide-sm">
-                  {c.delta && c.delta_sign !== 0 ? <Money className="num small" value={c.delta} /> : <span className="muted small">{c.last ? '持平' : '—'}</span>}
+                  {c.delta && c.delta_sign !== 0 ? (
+                    <span className="trend-line">
+                      <Trend sign={c.delta_sign} />
+                      <Money className="num small" value={c.delta} />
+                    </span>
+                  ) : (
+                    <span className="muted small">{c.last ? '持平' : '—'}</span>
+                  )}
                 </span>
               </div>
             ))}
@@ -184,7 +193,10 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
               <div className="trow">
                 <span>變化</span>
                 <span className={`cell r ${signClass(y.worth.sign)}`}>
-                  <Money className="num" value={y.worth.change} />
+                  <span className="trend-line">
+                    <Trend sign={y.worth.sign} />
+                    <Money className="num" value={y.worth.change} />
+                  </span>
                   {y.worth.pct && <span className="sub">{y.worth.pct}</span>}
                 </span>
               </div>
@@ -225,8 +237,11 @@ function Change({ c, label }: { c: YearChange | null; label?: string }) {
   return (
     <span className="sub muted">
       {label ? `　${label} ` : ' '}
-      <Money value={c.delta} />
-      {c.pct && `（${c.pct}）`}
+      <span className="trend-line">
+        <Trend sign={c.sign} />
+        <Money value={c.delta} />
+        {c.pct && `（${c.pct}）`}
+      </span>
     </span>
   );
 }

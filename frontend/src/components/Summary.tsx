@@ -1,4 +1,4 @@
-import { Money, RollingMoney, signClass } from '../lib/privacy';
+import { Money, RollingMoney, signClass, Trend } from '../lib/privacy';
 import type { State } from '../types';
 import { LineChart } from './Charts';
 
@@ -12,24 +12,9 @@ export function NetWorthCard({ state, className = '' }: { state: State; classNam
         <span className="ccy">NT$</span>
         <RollingMoney id="total" value={state.total} />
       </h1>
-      {invested && (
-        <dl className="metrics">
-          <div>
-            <dt>最近交易日漲跌</dt>
-            <dd className={signClass(state.day_sign)}>
-              <Money className="num" value={state.day_change} />
-              {state.day_change_pct && <span className="num pct">{state.day_change_pct}</span>}
-            </dd>
-          </div>
-          <div>
-            <dt>投資總報酬</dt>
-            <dd className={signClass(state.return_sign)}>
-              <Money className="num" value={state.total_return} />
-              {state.total_return_pct && <span className="num pct">{state.total_return_pct}</span>}
-            </dd>
-          </div>
-        </dl>
-      )}
+      {/* The investment figures (day change, total return) live on the 持股 card, once (2026-10-13);
+          this card shows how net worth itself moved. */}
+      <NetWorthChanges state={state} />
       {!invested && h.length < 2 && state.allocation_groups.groups.length > 0 && (
         <dl className="metrics">
           {state.allocation_groups.groups.map(g => (
@@ -160,5 +145,53 @@ export function AllocationCard({ state, className = '' }: { state: State; classN
         </>
       )}
     </section>
+  );
+}
+
+const amount = (s: string) => Number(s.replace(/[^\d.−-]/g, '').replace('−', '-'));
+const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.round(Math.abs(n)).toLocaleString('en-US')}`;
+const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
+
+/** 本月／今年 change from the snapshots (or since the first one, while there is less history), and the high. */
+function NetWorthChanges({ state }: { state: State }) {
+  const h = state.history;
+  if (h.length < 2) return null; // the card shows its first-days note then
+  const now = amount(state.total);
+  const today = state.today;
+  // The base for a period: the last snapshot before it starts, else its first snapshot (labelled with its date).
+  const since = (start: string) => {
+    const before = h.filter(p => p.date < start);
+    const p = before.length ? before[before.length - 1] : h.find(p => p.date >= start);
+    return p && p.date < today ? { date: p.date, from: before.length > 0, value: amount(p.total) } : null;
+  };
+  const rows: { label: string; delta: number; base: number }[] = [];
+  const month = since(`${today.slice(0, 7)}-01`);
+  const year = since(`${today.slice(0, 4)}-01-01`);
+  if (month) rows.push({ label: month.from ? '本月' : `從 ${md(month.date)} 起`, delta: now - month.value, base: month.value });
+  if (year && (!month || year.date !== month.date)) rows.push({ label: year.from ? '今年' : `從 ${md(year.date)} 起`, delta: now - year.value, base: year.value });
+  const high = h.reduce((best, p) => (amount(p.total) > amount(best.total) ? p : best), h[0]);
+  const atHigh = now >= amount(high.total);
+  return (
+    <dl className="metrics">
+      {rows.map(r => (
+        <div key={r.label}>
+          <dt>{r.label}</dt>
+          <dd className={signClass(Math.sign(r.delta))}>
+            {!(r.base > 0) && <Trend sign={Math.sign(r.delta)} />}
+            <Money className="num" value={signed(r.delta)} />
+            {r.base > 0 && (
+              <span className="num pct trend">
+                <Trend sign={Math.sign(r.delta)} />
+                {`${r.delta >= 0 ? '+' : '−'}${Math.abs((r.delta / r.base) * 100).toFixed(2)}%`}
+              </span>
+            )}
+          </dd>
+        </div>
+      ))}
+      <div>
+        <dt>最高點</dt>
+        <dd>{atHigh ? <span className="small">就是現在</span> : <><Money className="num" value={signed(amount(high.total)).replace('+', '')} /><span className="num pct">{md(high.date)}</span></>}</dd>
+      </div>
+    </dl>
   );
 }

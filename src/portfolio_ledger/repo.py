@@ -39,6 +39,7 @@ def _account(r: sqlite3.Row) -> Account:
         principal=_d(r["principal"]),
         term_years=_d(r["term_years"]),
         grace_years=_d(r["grace_years"]),
+        color=r["color"],
     )
 
 
@@ -56,19 +57,21 @@ def save_account(db: Db, a: Account) -> int:
     values = (
         a.name, a.type, a.currency, _s(a.fee_discount), _s(a.fee_min), int(a.archived), a.sort,
         _s(a.rate), a.start_date, a.maturity_date, a.group_name, _s(a.principal), _s(a.term_years), _s(a.grace_years),
+        a.color,
     )  # fmt: skip
     with db.write() as c:
         if a.id is None:
             cur = c.execute(
                 "INSERT INTO accounts (name, type, currency, fee_discount, fee_min, archived, sort,"
-                " rate, start_date, maturity_date, group_name, principal, term_years, grace_years)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " rate, start_date, maturity_date, group_name, principal, term_years, grace_years, color)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 values,
             )
             return int(cur.lastrowid or 0)
         c.execute(
             "UPDATE accounts SET name=?, type=?, currency=?, fee_discount=?, fee_min=?, archived=?, sort=?,"
-            " rate=?, start_date=?, maturity_date=?, group_name=?, principal=?, term_years=?, grace_years=? WHERE id=?",
+            " rate=?, start_date=?, maturity_date=?, group_name=?, principal=?, term_years=?, grace_years=?,"
+            " color=? WHERE id=?",
             (*values, a.id),
         )
         return a.id
@@ -334,7 +337,7 @@ def set_category_budget(db: Db, category_id: int, budget: Decimal | None) -> Non
 
 def _goal(r: sqlite3.Row) -> Goal:
     ids = [int(x) for x in r["account_ids"].split(",") if x]
-    return Goal(r["id"], r["name"], Decimal(r["target"]), r["deadline"], ids, r["sort"])
+    return Goal(r["id"], r["name"], Decimal(r["target"]), r["deadline"], ids, r["sort"], r["scope"])
 
 
 def list_goals(db: Db) -> list[Goal]:
@@ -342,12 +345,14 @@ def list_goals(db: Db) -> list[Goal]:
 
 
 def save_goal(db: Db, g: Goal) -> int:
-    values = (g.name, str(g.target), g.deadline, ",".join(str(i) for i in g.account_ids or []), g.sort)
+    values = (g.name, str(g.target), g.deadline, ",".join(str(i) for i in g.account_ids or []), g.sort, g.scope)
     with db.write() as c:
         if g.id is None:
-            cur = c.execute("INSERT INTO goals (name, target, deadline, account_ids, sort) VALUES (?, ?, ?, ?, ?)", values)
+            cur = c.execute(
+                "INSERT INTO goals (name, target, deadline, account_ids, sort, scope) VALUES (?, ?, ?, ?, ?, ?)", values
+            )
             return int(cur.lastrowid or 0)
-        c.execute("UPDATE goals SET name=?, target=?, deadline=?, account_ids=?, sort=? WHERE id=?", (*values, g.id))
+        c.execute("UPDATE goals SET name=?, target=?, deadline=?, account_ids=?, sort=?, scope=? WHERE id=?", (*values, g.id))
         return g.id
 
 

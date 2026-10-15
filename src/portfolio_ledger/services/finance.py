@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from .. import repo
-from ..models import LIFE_PLAN_KINDS, Goal, LifePlan, Tx
+from ..models import GOAL_SCOPES, LIFE_PLAN_KINDS, Goal, LifePlan, Tx
 from ..providers import yahoo
 from ..providers.base import ProviderError
 from . import advisor, fmt, planner
@@ -85,7 +85,7 @@ def month_report(lg: Ledger, month: str | None = None) -> dict[str, Any]:
                 "name": c.name,
                 "spent": fmt.money(s),
                 "budget": fmt.money(c.budget) if c.budget else None,
-                "budget_raw": str(c.budget.normalize()) if c.budget else "",
+                "budget_raw": f"{c.budget.normalize():f}" if c.budget else "",
                 "budget_ratio": float(s / c.budget) if c.budget else None,
                 "share": float(s / expense) if expense else 0.0,
                 "last": fmt.money(l) if l else None,
@@ -317,6 +317,24 @@ def _recent_averages(lg: Ledger) -> tuple[Decimal, Decimal, int]:
     return a["net"] or ZERO, (a["spend"] or ZERO) * 12, a["months12"]
 
 
+def _goal_current(v: dict[str, Any], scope: str, ids: list[int]) -> Decimal:
+    """What a savings goal has so far, by its 追蹤範圍."""
+    if scope == "total":
+        return v["total"]
+    if scope == "accounts":
+        return sum((v["acc_value_twd"].get(i, ZERO) for i in ids), ZERO)
+    # cash / cash_deposit: TWD bank and cash balances plus the TWD cash in broker accounts (never the stocks).
+    out = ZERO
+    for a, bal, _ in v["accounts"]:
+        if a.archived or a.currency != "TWD":
+            continue
+        if a.type in ("bank", "cash", "broker_tw", "broker_us"):
+            out += bal
+        elif a.type == "deposit" and scope == "cash_deposit":
+            out += v["acc_value_twd"].get(a.id or 0, ZERO)
+    return out
+
+
 def plan(lg: Ledger) -> dict[str, Any]:
     v = lg._valuation()
     total: Decimal = v["total"]
@@ -326,7 +344,7 @@ def plan(lg: Ledger) -> dict[str, Any]:
     goals = []
     for g in repo.list_goals(lg.db):
         ids = [i for i in g.account_ids or [] if i in accounts]
-        current = sum((v["acc_value_twd"].get(i, ZERO) for i in ids), ZERO) if ids else total
+        current = _goal_current(v, g.scope, ids)
         left = g.target - current
         months = planner.months_between(today, Date.fromisoformat(g.deadline)) if g.deadline else None
         goals.append(
@@ -334,10 +352,12 @@ def plan(lg: Ledger) -> dict[str, Any]:
                 "id": g.id,
                 "name": g.name,
                 "target": fmt.money(g.target),
-                "target_raw": str(g.target.normalize()),
+                "target_raw": f"{g.target.normalize():f}",
                 "deadline": g.deadline,
                 "account_ids": ids,
                 "accounts": [accounts[i].name for i in ids],
+                "scope": g.scope,
+                "scope_label": GOAL_SCOPES.get(g.scope, g.scope),
                 "current": fmt.money(current),
                 "ratio": float(current / g.target) if g.target else 0.0,
                 "left": fmt.money(left) if left > 0 else None,
@@ -725,8 +745,16 @@ def save_goal(lg: Ledger, data: dict[str, Any]) -> int:
         except ValueError:
             raise FinanceError("期限要是 YYYY-MM-DD 格式") from None
     ids = [int(i) for i in data.get("account_ids") or []]
+    # Callers that send no scope (older ones) meant: ticked accounts, else the whole net worth.
+    scope = str(data.get("scope") or ("accounts" if ids else "total"))
+    if scope not in GOAL_SCOPES:
+        raise FinanceError("請選擇追蹤範圍")
+    if scope == "accounts" and not ids:
+        raise FinanceError("自訂帳戶要勾選至少一個帳戶")
     gid = data.get("id")
-    return repo.save_goal(lg.db, Goal(int(gid) if gid is not None else None, name, target, deadline, ids))
+    return repo.save_goal(
+        lg.db, Goal(int(gid) if gid is not None else None, name, target, deadline, ids if scope == "accounts" else [], scope=scope)
+    )
 
 
 def delete_goal(lg: Ledger, goal_id: int) -> None:

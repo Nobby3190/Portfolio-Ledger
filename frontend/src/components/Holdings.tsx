@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Money, signClass } from '../lib/privacy';
+import { Money, signClass, Trend } from '../lib/privacy';
 import type { Closed, Holding, TxRow } from '../types';
 import { TxLine } from './Activity';
 
@@ -9,16 +9,22 @@ interface Props {
   value: string;
   unrealized: string;
   unrealizedSign: number;
+  unrealizedPct: string | null;
   dayChange: string;
   dayChangePct: string | null;
   daySign: number;
+  totalReturn: string;
+  totalReturnPct: string | null;
+  returnSign: number;
   transactions: TxRow[];
   onEdit(id: number): void;
   onBuy(): void;
 }
 
-/** 持股: first card under the totals, since tracking investments is what the app is for (2026-10-13). */
-export function Holdings({ holdings, closed, value, unrealized, unrealizedSign, dayChange, dayChangePct, daySign, transactions, onEdit, onBuy }: Props) {
+/** 持股: first card under the totals, since tracking investments is what the app is for (2026-10-13).
+ *  Every investment figure is shown here and only here: value, unrealized, day change, total return. */
+export function Holdings(props: Props) {
+  const { holdings, closed, value, unrealized, unrealizedSign, dayChange, dayChangePct, daySign, transactions, onEdit, onBuy } = props;
   const [open, setOpen] = useState<string | null>(null);
   const [showClosed, setShowClosed] = useState(false);
   if (holdings.length === 0 && closed.length === 0) {
@@ -35,7 +41,6 @@ export function Holdings({ holdings, closed, value, unrealized, unrealizedSign, 
     );
   }
   const txsOf = (ids: number[]) => transactions.filter(t => ids.includes(t.id));
-  const unrealizedPct = holdings.length > 0 ? pctOf(unrealized, value) : null;
 
   return (
     <section className="card span-12" aria-labelledby="holdings-h">
@@ -54,15 +59,40 @@ export function Holdings({ holdings, closed, value, unrealized, unrealizedSign, 
           <div>
             <dt>未實現損益</dt>
             <dd className={signClass(unrealizedSign)}>
+              {!props.unrealizedPct && <Trend sign={unrealizedSign} />}
               <Money className="num" value={unrealized} />
-              {unrealizedPct && <span className="num pct">{unrealizedPct}</span>}
+              {props.unrealizedPct && (
+                <span className="num pct trend">
+                  <Trend sign={unrealizedSign} />
+                  {props.unrealizedPct}
+                </span>
+              )}
             </dd>
           </div>
           <div>
             <dt>最近交易日漲跌</dt>
             <dd className={signClass(daySign)}>
+              {!dayChangePct && <Trend sign={daySign} />}
               <Money className="num" value={dayChange} />
-              {dayChangePct && <span className="num pct">{dayChangePct}</span>}
+              {dayChangePct && (
+                <span className="num pct trend">
+                  <Trend sign={daySign} />
+                  {dayChangePct}
+                </span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>投資總報酬</dt>
+            <dd className={signClass(props.returnSign)}>
+              {!props.totalReturnPct && <Trend sign={props.returnSign} />}
+              <Money className="num" value={props.totalReturn} />
+              {props.totalReturnPct && (
+                <span className="num pct trend">
+                  <Trend sign={props.returnSign} />
+                  {props.totalReturnPct}
+                </span>
+              )}
             </dd>
           </div>
         </dl>
@@ -94,13 +124,21 @@ export function Holdings({ holdings, closed, value, unrealized, unrealizedSign, 
                   </span>
                   <span className="cell r">
                     <span className="num">{h.close ?? '—'}</span>
-                    {h.day_pct && <span className={`sub num ${signClass(h.day_sign)}`}>{h.day_pct}</span>}
+                    {h.day_pct && (
+                      <span className={`sub num trend-line ${signClass(h.day_sign)}`}>
+                        <Trend sign={h.day_sign} />
+                        {h.day_pct}
+                      </span>
+                    )}
                   </span>
                   <span className="cell r hide-sm">
                     <Money className="num" value={h.value_twd} />
                   </span>
                   <span className={`cell r ${signClass(h.sign)}`}>
-                    <Money className="num" value={h.unrealized} />
+                    <span className="trend-line">
+                      <Trend sign={h.sign} />
+                      <Money className="num" value={h.unrealized} />
+                    </span>
                     <span className="sub num" style={{ color: 'inherit' }}>
                       {h.unrealized_pct}
                     </span>
@@ -119,7 +157,8 @@ export function Holdings({ holdings, closed, value, unrealized, unrealizedSign, 
                       </div>
                       <div>
                         <dt>最近交易日漲跌</dt>
-                        <dd className={`num ${signClass(h.day_sign)}`}>
+                        <dd className={`num trend-line ${signClass(h.day_sign)}`}>
+                          <Trend sign={h.day_sign} />
                           <Money value={h.day_change} />
                         </dd>
                       </div>
@@ -190,7 +229,10 @@ export function Holdings({ holdings, closed, value, unrealized, unrealizedSign, 
                     <Money className="num" value={c.dividends ?? '—'} />
                   </span>
                   <span className={`cell r ${signClass(c.sign)}`}>
-                    <Money className="num" value={c.realized} />
+                    <span className="trend-line">
+                      <Trend sign={c.sign} />
+                      <Money className="num" value={c.realized} />
+                    </span>
                   </span>
                 </div>
               ))}
@@ -200,14 +242,4 @@ export function Holdings({ holdings, closed, value, unrealized, unrealizedSign, 
       )}
     </section>
   );
-}
-
-/** Unrealized as a share of its cost basis: value − unrealized. "+12.3%"; null when it can't be told. */
-function pctOf(unrealized: string, value: string): string | null {
-  const n = (x: string) => Number(x.replace(/[^\d.−-]/g, '').replace('−', '-'));
-  const u = n(unrealized);
-  const cost = n(value) - u;
-  if (!Number.isFinite(u) || !(cost > 0)) return null;
-  const p = (u / cost) * 100;
-  return `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p).toFixed(2)}%`;
 }

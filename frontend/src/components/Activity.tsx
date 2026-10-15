@@ -79,7 +79,7 @@ export function TxLine({ t, onEdit }: { t: TxRow; onEdit(id: number): void }) {
     <button type="button" className={`trow ${fresh ? 'fresh' : ''}`} title="點一下修改" onClick={() => onEdit(t.id)}>
       <span className="date num">{t.date.slice(5).replace('-', '/')}</span>
       <span className="cell-ic">
-        <IconBadge name={txIcon(t.kind, t.category)} tone={toneOf(t.kind)} />
+        <IconBadge name={txIcon(t.kind, t.category, t.note)} tone={toneOf(t.kind)} />
         <span className="cell">
           <span className="ellipsis">
             {title}

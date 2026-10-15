@@ -63,3 +63,13 @@ export function RollingMoney({ id, value, className }: { id: string; value: stri
 export function signClass(sign: number): string {
   return sign > 0 ? 'up' : sign < 0 ? 'down' : '';
 }
+
+/** An up/down arrow for a change; takes the colour of the figure it sits in. Shown in privacy mode too. */
+export function Trend({ sign }: { sign: number }) {
+  if (!sign) return null;
+  return (
+    <svg className="trend-arrow" viewBox="0 0 12 12" width="11" height="11" aria-hidden>
+      <path d={sign > 0 ? 'M6 10V2M2.5 5.5 6 2l3.5 3.5' : 'M6 2v8M2.5 6.5 6 10l3.5-3.5'} />
+    </svg>
+  );
+}

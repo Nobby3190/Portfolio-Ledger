@@ -1,7 +1,7 @@
 import { type ReactNode, useContext, useEffect, useState } from 'react';
 import { api } from '../api';
 import { categoryIcon, IconBadge, toneOf, txIcon } from '../lib/icons';
-import { Money, PrivacyContext, RollingMoney } from '../lib/privacy';
+import { Money, PrivacyContext, RollingMoney, Trend } from '../lib/privacy';
 import type { MonthReport, RecurringRule, State } from '../types';
 import { TxList } from './Activity';
 import { PairBars } from './Charts';
@@ -179,6 +179,7 @@ function MonthView({
           <div>
             <dt>結餘</dt>
             <dd>
+              <Trend sign={m.net_sign} />
               <Money className="num" value={m.net} />
             </dd>
           </div>
@@ -263,7 +264,14 @@ function MonthView({
                     <InlineAmount label={c.budget ? (hidden ? '••••' : c.budget) : '設定'} value={c.budget_raw} onSave={v => saveCategory(c.id, v)} />
                   </span>
                   <span className="cell r hide-sm">
-                    {!m.is_future && c.delta && c.delta_sign !== 0 ? <Money className="num small" value={c.delta} /> : <span className="muted small">—</span>}
+                    {!m.is_future && c.delta && c.delta_sign !== 0 ? (
+                      <span className="trend-line">
+                        <Trend sign={c.delta_sign} />
+                        <Money className="num small" value={c.delta} />
+                      </span>
+                    ) : (
+                      <span className="muted small">—</span>
+                    )}
                   </span>
                 </div>
               );
@@ -387,7 +395,7 @@ function Upcoming({ state, onOpen }: { state: State; onOpen(): void }) {
           <button key={r.id} type="button" className="trow" onClick={onOpen}>
             <span className="date num">{r.next_date!.slice(5).replace('-', '/')}</span>
             <span className="cell-ic">
-              <IconBadge name={txIcon(r.kind, r.category)} tone={toneOf(r.kind)} />
+              <IconBadge name={txIcon(r.kind, r.category, r.line)} tone={toneOf(r.kind)} />
               <span className="ellipsis">{r.title}</span>
             </span>
             <span className="cell r">{r.amount ? <Money className="num" value={r.amount} /> : <span className="muted small">月付</span>}</span>

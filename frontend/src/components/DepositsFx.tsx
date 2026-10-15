@@ -1,4 +1,4 @@
-import { Money, signClass } from '../lib/privacy';
+import { Money, signClass, Trend } from '../lib/privacy';
 import { IconBadge } from '../lib/icons';
 import type { State } from '../types';
 
@@ -59,7 +59,10 @@ export function DepositsFx({ state, className = '' }: { state: State; className?
             <span className={`cell r hide-sm ${signClass(f.sign)}`}>
               {f.gain && (
                 <>
-                  <Money className="num" value={f.gain} />
+                  <span className="trend-line">
+                    <Trend sign={f.sign} />
+                    <Money className="num" value={f.gain} />
+                  </span>
                   <span className="sub" style={{ color: 'inherit' }}>
                     匯差
                   </span>

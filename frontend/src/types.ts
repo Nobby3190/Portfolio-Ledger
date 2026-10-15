@@ -79,6 +79,7 @@ export interface AccountRow {
   term_years: string | null;
   grace_years: string | null;
   archived: boolean;
+  color: string | null; // picked by hand; null = from the bank/broker in the name
 }
 
 export interface Loan {
@@ -148,6 +149,7 @@ export interface State {
   holdings_value: string;
   holdings_unrealized: string;
   holdings_unrealized_sign: Sign;
+  holdings_unrealized_pct: string | null; // on the open positions' cost, like each row's
   closed: Closed[];
   transactions: TxRow[];
   categories: { id: number; name: string; kind: 'income' | 'expense'; uses: number }[];
@@ -211,6 +213,7 @@ export interface AccountInput {
   term_years?: string;
   grace_years?: string;
   archived?: boolean;
+  color?: string;
 }
 
 export interface MonthReport {
@@ -340,6 +343,8 @@ export interface Goal {
   deadline: string | null;
   account_ids: number[];
   accounts: string[];
+  scope: 'cash' | 'cash_deposit' | 'total' | 'accounts';
+  scope_label: string;
   current: string;
   ratio: number;
   left: string | null;
@@ -505,6 +510,7 @@ export interface TxFields {
 export interface AccountGroup {
   name: string;
   type: string;
+  color: string | null;
   currencies: string[];
   total: string;
   archived: boolean;
@@ -515,4 +521,5 @@ export interface GroupInput {
   old_name?: string;
   type: string;
   currencies: string[];
+  color?: string;
 }

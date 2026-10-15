@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { BRANDS, type BrandSlug, brandOf } from './brands';
 
 /** Hand-drawn line icons for account types and income/expense categories (DESIGN.md 2「圖示」).
  *  24×24, stroked in currentColor so they follow the theme tokens. */
@@ -95,10 +96,19 @@ const PATHS = {
   ),
 } satisfies Record<string, ReactNode>;
 
-export type IconName = keyof typeof PATHS;
+/** A line icon, or a brand logo (`brand:netflix`, from brands.ts). */
+export type IconName = keyof typeof PATHS | `brand:${BrandSlug}`;
 export type IconTone = 'expense' | 'income' | 'neutral';
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
+  if (name.startsWith('brand:')) {
+    // Brand logos are filled and run edge to edge; the wider viewBox gives them the line icons' margin.
+    return (
+      <svg className="icon brand" width={size} height={size} viewBox="-2.5 -2.5 29 29" fill="currentColor" aria-hidden>
+        <path d={BRANDS[name.slice(6) as BrandSlug].d} />
+      </svg>
+    );
+  }
   return (
     <svg
       className="icon"
@@ -112,7 +122,7 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       strokeLinejoin="round"
       aria-hidden
     >
-      {PATHS[name]}
+      {PATHS[name as keyof typeof PATHS]}
     </svg>
   );
 }
@@ -178,12 +188,15 @@ export function categoryIcon(name: string | null, kind: string): IconName {
   return KEYWORDS.find(([words]) => words.some(w => name.includes(w)))?.[1] ?? 'tag';
 }
 
-/** A ledger entry's icon: its category for income/expense, otherwise what kind of move it was. */
-export function txIcon(kind: string, category: string | null): IconName {
+/** A ledger entry's icon: for income/expense the brand its note names (Netflix, Claude…) or else its
+ *  category; otherwise what kind of move it was. */
+export function txIcon(kind: string, category: string | null, text?: string | null): IconName {
   switch (kind) {
     case 'income':
-    case 'expense':
-      return categoryIcon(category, kind);
+    case 'expense': {
+      const brand = brandOf(text);
+      return brand ? `brand:${brand}` : categoryIcon(category, kind);
+    }
     case 'transfer':
       return 'transfer';
     case 'repay':
