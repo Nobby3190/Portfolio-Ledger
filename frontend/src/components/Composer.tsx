@@ -99,7 +99,8 @@ export function toLine(f: TxFields, today: string): string {
       break;
     }
     case 'cash_dividend':
-      add('息', word(f.symbol), clean(f.amount), acct);
+      // 稅前: Python takes off 預扣稅／二代健保 (or the 稅 typed) and stores what arrived.
+      add('息', word(f.symbol), clean(f.amount), f.gross && '稅前', acct, f.gross && f.tax && `稅 ${clean(f.tax)}`);
       break;
     case 'more':
       // 還款: the loan is `account`, the payer `to_account`; no amount = this month's scheduled payment.
@@ -282,7 +283,7 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
 
         {usesAmount && (
           <label className="amount-field">
-            <span className="ccy">{f.kind === 'cash_dividend' ? '實收' : ccy}</span>
+            <span className="ccy">{f.kind === 'cash_dividend' ? (f.gross ? '稅前' : '實收') : ccy}</span>
             <input
               ref={f.kind === 'cash_dividend' ? undefined : firstField}
               className="num"
@@ -292,6 +293,16 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
               aria-label="金額"
               onChange={e => set({ amount: e.target.value })}
             />
+          </label>
+        )}
+
+        {f.kind === 'cash_dividend' && (
+          <label className="backfill">
+            <input type="checkbox" checked={!!f.gross} onChange={e => set({ gross: e.target.checked, tax: '' })} />
+            <span>
+              填的是稅前金額
+              <span className="muted tiny">　美股自動扣 30% 預扣稅；台股單筆滿 20,000 自動扣二代健保 2.11%。記下的是實收金額，下方預覽看得到扣了多少</span>
+            </span>
           </label>
         )}
 
@@ -562,7 +573,7 @@ function AccountSelect(props: { accounts: State['accounts']; value: string; onCh
 }
 
 /** Code field with suggestions from the security list (and Yahoo for US tickers). */
-function SymbolField(props: {
+export function SymbolField(props: {
   value: string;
   onChange(v: string): void;
   onPick(symbol: string, close: string | null): void;

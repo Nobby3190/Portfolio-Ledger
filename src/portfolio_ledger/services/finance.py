@@ -14,7 +14,7 @@ from .. import repo
 from ..models import GOAL_SCOPES, LIFE_PLAN_KINDS, Goal, LifePlan, Tx
 from ..providers import yahoo
 from ..providers.base import ProviderError
-from . import advisor, fmt, planner
+from . import advisor, dividends, fmt, planner
 
 if TYPE_CHECKING:
     from .ledger import Ledger
@@ -591,8 +591,18 @@ def advice(lg: Ledger) -> dict[str, Any]:
 
     total: Decimal = v["total"]
     holdings = [
-        advisor.Holding(h["name"], float(h["value_twd"]), h["kind"] in ("etf", "bond_etf")) for h in v["open"]
+        advisor.Holding(h["name"], float(h["value_twd"]), h["kind"] in ("etf", "bond_etf"), MARKET_LABELS.get(h["market"], "海外股"))
+        for h in v["open"]
     ]
+    foreign = sum((h["value_twd"] for h in v["open"] if h["currency"] != "TWD"), ZERO)
+    for a, bal, _ in v["accounts"]:
+        if not a.archived and a.currency != "TWD" and bal > 0:
+            foreign += bal * (v["rate"](a.currency) or ZERO)
+    brokers: dict[str, Decimal] = {}
+    for acc_id, value in v["acc_hold_twd"].items():
+        acc = v["acc_by_id"][acc_id]
+        name = acc.group_name or acc.name  # a multi-currency account is one broker
+        brokers[name] = brokers.get(name, ZERO) + value
     drift = []
     if holdings:
         classes = {k: float(x) for k, x in v["classes"].items()}
@@ -626,9 +636,56 @@ def advice(lg: Ledger) -> dict[str, Any]:
         loan_payment=sum(loans) if loans else None,
         loan_plans=loan_names,
         deposits=[advisor.Deposit(d["name"], d["days_left"]) for d in lg._deposits(v) if d["days_left"] is not None],
+        total=float(total),
+        foreign=float(foreign),
+        brokers=[(k, float(x)) for k, x in brokers.items()],
     )
     items = advisor.check(inputs, t) if total > 0 else []
     return {"items": items, "thresholds": {k: f"{x:g}" for k, x in t.items()}}
+
+
+MARKET_LABELS = {"TWSE": "台股", "TPEX": "台股", "US": "美股", "HK": "港股"}
+
+
+# ── 股利 ──────────────────────────────────────────────────────────────────
+
+UPCOMING_DAYS = 60
+
+
+def dividend_report(lg: Ledger) -> dict[str, Any]:
+    """The 股利 card: last 12 months, yield on cost, share of spending, coming 除息 (DESIGN.md v1.4)."""
+    v = lg._valuation()
+    today = lg.today()
+    paid = lg._paid_dividends(v)
+    avg = _averages(lg)
+    annual = avg["spend"] * 12 if avg["spend"] else None
+    s = dividends.summarize(paid, {h["symbol"]: h["cost_twd"] for h in v["open"]}, annual, today)
+    names = {h["symbol"]: h["name"] for h in v["holdings"].values()}
+
+    held = {h["symbol"]: h for h in v["open"]}
+    end = Date.fromordinal(today.toordinal() + UPCOMING_DAYS).isoformat()
+    upcoming = []
+    for sym, ex, cash, pay in repo.dividend_events(lg.db, held, today.isoformat(), end):
+        h = held[sym]
+        upcoming.append({
+            "symbol": sym, "name": h["name"], "ex_date": ex, "pay_date": pay,
+            "cash": fmt.price(cash) if cash is not None else None, "currency": h["currency"],
+            "estimate": fmt.money(cash * h["qty"], h["currency"]) if cash is not None else None,
+        })  # fmt: skip
+
+    return {
+        "has": bool(paid) or bool(upcoming),
+        "ttm": fmt.money(s.ttm),
+        "ytd": fmt.money(s.ytd),
+        "yield_on_cost": fmt.pct(s.yield_on_cost, Decimal(1)) if s.yield_on_cost is not None else None,
+        "cover": fmt.pct(s.cover, Decimal(1)) if s.cover is not None else None,
+        "by_symbol": [
+            {"symbol": k, "name": names.get(k, k), "amount": fmt.money(x), "ratio": float(x / s.ttm) if s.ttm else 0.0,
+             "held": k in held}
+            for k, x in s.by_symbol
+        ],  # fmt: skip
+        "upcoming": upcoming,
+    }
 
 
 def _targets(lg: Ledger) -> dict[str, float]:

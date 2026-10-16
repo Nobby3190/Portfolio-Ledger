@@ -116,3 +116,54 @@ def search(client: httpx.Client, q: str, limit: int = 6) -> list[tuple[str, str,
                 continue  # Taiwan listings come from the exchanges' own lists
             out.append((sym, item.get("longname") or item.get("shortname") or sym, item.get("exchange") or ""))
     return out
+
+
+FUNDAMENTALS_URL = "https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/{symbol}"
+# Yahoo annual series -> our field (DESIGN.md 5.4; tested 2026-10-15, no crumb needed)
+FUNDAMENTAL_TYPES = {
+    "annualTotalRevenue": "revenue",
+    "annualGrossProfit": "gross_profit",
+    "annualEBIT": "ebit",
+    "annualNetIncomeCommonStockholders": "net_income",
+    "annualDilutedEPS": "eps",
+    "annualStockholdersEquity": "equity",
+    "annualOrdinarySharesNumber": "shares",
+    "annualOperatingCashFlow": "ocf",
+    "annualCapitalExpenditure": "capex",  # negative: cash paid
+    "annualInterestExpense": "interest",
+}
+
+
+def parse_fundamentals(data: dict[str, Any]) -> tuple[dict[str, dict[str, Decimal]], str | None]:
+    """({fiscal year: {field: value}}, reporting currency). The year is the one the fiscal year ends in."""
+    out: dict[str, dict[str, Decimal]] = {}
+    currency = None
+    for r in ((data.get("timeseries") or {}).get("result")) or []:
+        typ = ((r.get("meta") or {}).get("type") or [None])[0]
+        field = FUNDAMENTAL_TYPES.get(typ or "")
+        if field is None:
+            continue
+        for item in r.get(typ) or []:
+            if not item:
+                continue
+            v = dec((item.get("reportedValue") or {}).get("raw"))
+            day = str(item.get("asOfDate") or "")
+            if v is None or len(day) < 4:
+                continue
+            if field == "capex":
+                v = -v  # what was spent, positive
+            out.setdefault(day[:4], {})[field] = v
+            if field == "revenue":
+                currency = item.get("currencyCode") or currency
+    return {y: row for y, row in out.items() if "revenue" in row}, currency
+
+
+def fundamentals(client: httpx.Client, symbol: str) -> tuple[dict[str, dict[str, Decimal]], str | None]:
+    now = int(datetime.now(UTC).timestamp())
+    params = {"type": ",".join(FUNDAMENTAL_TYPES), "period1": now - 7 * 366 * 86400, "period2": now}
+    try:
+        resp = client.get(FUNDAMENTALS_URL.format(symbol=symbol), params=params)
+        resp.raise_for_status()
+        return parse_fundamentals(resp.json())
+    except (httpx.HTTPError, ValueError) as e:
+        raise ProviderError(f"Yahoo 財報下載 {symbol} 失敗：{e}") from e

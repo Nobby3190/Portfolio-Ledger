@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Money, signClass, Trend } from '../lib/privacy';
 import type { Closed, Holding, TxRow } from '../types';
 import { TxLine } from './Activity';
+import { FundamentalsBlock } from './Fundamentals';
+import { NoteBlock } from './Notes';
 
 interface Props {
   holdings: Holding[];
@@ -16,7 +18,9 @@ interface Props {
   totalReturn: string;
   totalReturnPct: string | null;
   returnSign: number;
+  xirr: string | null;
   transactions: TxRow[];
+  today: string;
   onEdit(id: number): void;
   onBuy(): void;
 }
@@ -24,12 +28,12 @@ interface Props {
 /** 持股: first card under the totals, since tracking investments is what the app is for (2026-10-13).
  *  Every investment figure is shown here and only here: value, unrealized, day change, total return. */
 export function Holdings(props: Props) {
-  const { holdings, closed, value, unrealized, unrealizedSign, dayChange, dayChangePct, daySign, transactions, onEdit, onBuy } = props;
+  const { holdings, closed, transactions, onEdit, onBuy } = props;
   const [open, setOpen] = useState<string | null>(null);
   const [showClosed, setShowClosed] = useState(false);
   if (holdings.length === 0 && closed.length === 0) {
     return (
-      <section className="card span-12" aria-labelledby="holdings-h">
+      <section className="card span-8" aria-labelledby="holdings-h">
         <header className="card-head">
           <h2 id="holdings-h">投資</h2>
           <button type="button" className="primary" onClick={onBuy}>
@@ -41,63 +45,25 @@ export function Holdings(props: Props) {
     );
   }
   const txsOf = (ids: number[]) => transactions.filter(t => ids.includes(t.id));
+  const top = Math.max(0.0001, ...holdings.map(h => h.weight));
 
   return (
-    <section className="card span-12" aria-labelledby="holdings-h">
+    <section className="card span-8" aria-labelledby="holdings-h">
       <header className="card-head">
         <h2 id="holdings-h">持股</h2>
-        {holdings.length > 0 && <span className="aside">{holdings.length} 檔</span>}
-      </header>
-      {holdings.length > 0 && (
-        <dl className="metrics holdings-metrics">
-          <div>
-            <dt>市值</dt>
-            <dd>
-              <Money className="num" value={value} />
-            </dd>
-          </div>
-          <div>
-            <dt>未實現損益</dt>
-            <dd className={signClass(unrealizedSign)}>
-              {!props.unrealizedPct && <Trend sign={unrealizedSign} />}
-              <Money className="num" value={unrealized} />
-              {props.unrealizedPct && (
-                <span className="num pct trend">
-                  <Trend sign={unrealizedSign} />
-                  {props.unrealizedPct}
-                </span>
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt>最近交易日漲跌</dt>
-            <dd className={signClass(daySign)}>
-              {!dayChangePct && <Trend sign={daySign} />}
-              <Money className="num" value={dayChange} />
-              {dayChangePct && (
-                <span className="num pct trend">
-                  <Trend sign={daySign} />
-                  {dayChangePct}
-                </span>
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt>投資總報酬</dt>
-            <dd className={signClass(props.returnSign)}>
-              {!props.totalReturnPct && <Trend sign={props.returnSign} />}
+        {holdings.length > 0 && (
+          <span className="aside">
+            {holdings.length} 檔
+            {/* 市值、未實現、最近交易日 sit on the 持股 tile beside the total (大膽版); the total return stays here */}
+            <span className={`trend-line ${signClass(props.returnSign)}`}>
+              總報酬 <Trend sign={props.returnSign} />
               <Money className="num" value={props.totalReturn} />
-              {props.totalReturnPct && (
-                <span className="num pct trend">
-                  <Trend sign={props.returnSign} />
-                  {props.totalReturnPct}
-                </span>
-              )}
-            </dd>
-          </div>
-        </dl>
-      )}
-
+              {props.totalReturnPct && <span className="num">（{props.totalReturnPct}）</span>}
+            </span>
+            {props.xirr && <span className="num">年化 {props.xirr}</span>}
+          </span>
+        )}
+      </header>
       {holdings.length > 0 && (
         <div className="table holdings-t">
           <div className="thead" aria-hidden>
@@ -114,10 +80,17 @@ export function Holdings(props: Props) {
                 <button type="button" className="trow" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : h.symbol)}>
                   <span className="cell">
                     <span className="main">
-                      <span className="code">{h.symbol}</span>
+                      <span className="code" style={{ '--t': marketTone(h.currency) } as React.CSSProperties}>
+                        {h.symbol}
+                      </span>
                       <span className="ellipsis">{h.name}</span>
                     </span>
-                    <span className="sub">佔總資產 {Math.round(h.weight * 100)}%</span>
+                    <span className="sub weight-line">
+                      <span className="meter" aria-hidden style={{ '--t': marketTone(h.currency) } as React.CSSProperties}>
+                        <span style={{ width: `${Math.min(h.weight / top, 1) * 100}%` }} />
+                      </span>
+                      佔總資產 {Math.round(h.weight * 100)}%
+                    </span>
                   </span>
                   <span className="cell r hide-sm">
                     <span className="num">{h.qty}</span>
@@ -186,12 +159,29 @@ export function Holdings(props: Props) {
                           </dd>
                         </div>
                       )}
+                      {h.dividends_ttm && (
+                        <div>
+                          <dt>近 12 個月股利</dt>
+                          <dd className="num">
+                            <Money value={h.dividends_ttm} />
+                            {h.yield_on_cost && <span className="muted">（成本殖利率 {h.yield_on_cost}）</span>}
+                          </dd>
+                        </div>
+                      )}
+                      {h.xirr && (
+                        <div>
+                          <dt>年化報酬</dt>
+                          <dd className="num">{h.xirr}</dd>
+                        </div>
+                      )}
                       <div>
                         <dt>帳戶</dt>
                         <dd>{h.accounts.join('、')}</dd>
                       </div>
                     </dl>
                     <p className="note">未實現損益已扣除預估的賣出手續費和證交稅。點交易可以修改。</p>
+                    <NoteBlock symbol={h.symbol} name={h.name} today={props.today} />
+                    <FundamentalsBlock symbol={h.symbol} />
                     <div className="table tx-t">
                       {txsOf(h.tx_ids).map(t => (
                         <TxLine key={t.id} t={t} onEdit={onEdit} />
@@ -243,3 +233,6 @@ export function Holdings(props: Props) {
     </section>
   );
 }
+
+/** Ticker chips and weight bars take the market's colour: 台股 indigo, 美股 sky, others plum. */
+const marketTone = (currency: string) => (currency === 'TWD' ? 'var(--tone-indigo)' : currency === 'USD' ? 'var(--tone-sky)' : 'var(--tone-plum)');

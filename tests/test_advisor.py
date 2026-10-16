@@ -56,3 +56,20 @@ def test_savings_rate_and_deposits_and_order():
     got = {a["key"]: a["level"] for a in items}
     assert got["savings"] == "note" and got["deposit"] == "note" and got["fund"] == "warn"
     assert "deposit" not in levels(base(deposits=[Deposit("一年定存", 90)]))
+
+
+def test_foreign_currency_exposure():
+    assert levels(base(total=1_000_000, foreign=600_000))["fx"] == "note"
+    assert levels(base(total=1_000_000, foreign=400_000))["fx"] == "ok"
+    assert "fx" not in levels(base(total=1_000_000))  # no foreign assets
+
+
+def test_market_and_broker_concentration():
+    h = [Holding("台積電", 450_000, False, "台股"), Holding("0050", 450_000, True, "台股"), Holding("VOO", 100_000, True, "美股")]
+    lv = levels(base(holdings=h, brokers=[("國泰證券", 900_000), ("複委託", 100_000)]))
+    assert lv["market"] == "note" and lv["broker"] == "note"  # 90% 台股, 90% one broker
+    lv = levels(base(holdings=h, brokers=[("國泰證券", 600_000), ("永豐", 400_000)]), market_pct=95)
+    assert lv["market"] == "ok" and lv["broker"] == "ok"
+    small = [Holding("0050", 50_000, True, "台股")]
+    lv = levels(base(holdings=small, brokers=[("國泰證券", 50_000)]))
+    assert "market" not in lv and "broker" not in lv  # too little invested to nag

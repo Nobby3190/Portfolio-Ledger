@@ -814,6 +814,23 @@ export function SettingsPanel({ state, onState, onClose }: { state: State; onSta
           備份資料庫
         </button>
       </div>
+      <div className="actions">
+        <button
+          type="button"
+          className="chip"
+          onClick={async () => {
+            const r = await api.copyHoldings();
+            setMsg(r.ok ? { text: `已複製：${r.text}` } : { text: r.error, bad: true });
+          }}
+        >
+          複製持倉（給 ai-berkshire）
+        </button>
+        <button type="button" className="chip" onClick={() => run(api.exportHoldingsMd, '已存成檔案')}>
+          持倉存成 Markdown
+        </button>
+        <span className="muted tiny">複製的是一行 /portfolio-review 指令，貼到 Claude Code 的 ai-berkshire 資料夾執行</span>
+      </div>
+      <AlertSettings onSaved={ok => setMsg(ok === true ? { text: '已儲存' } : { text: ok, bad: true })} />
       <AdviceThresholds
         onSaved={async ok => {
           setMsg(ok === true ? { text: '已儲存' } : { text: ok, bad: true });
@@ -837,7 +854,56 @@ const THRESHOLDS: [string, string, string][] = [
   ['savings_min_pct', '儲蓄率低於', '%'],
   ['deposit_days', '定存到期前', '天提醒'],
   ['near_years', '幾年內要用的錢該放現金', '年'],
+  ['fx_pct', '外幣資產佔總資產超過', '%'],
+  ['market_pct', '單一市場佔投資超過', '%'],
+  ['broker_pct', '單一券商佔投資超過', '%'],
 ];
+
+/** 價格提醒 thresholds (DESIGN.md v1.4), collapsed by default. */
+function AlertSettings({ onSaved }: { onSaved(ok: true | string): void }) {
+  const [open, setOpen] = useState(false);
+  const [values, setValues] = useState<{ day_pct: string; week_pct: string; watchlist: boolean } | null>(null);
+  useEffect(() => {
+    if (!open || values) return;
+    void api.alerts().then(r => r.ok && setValues(r.alerts.settings));
+  }, [open, values]);
+
+  async function save(next: Partial<{ day_pct: string; week_pct: string; watchlist: boolean }>) {
+    const r = await api.saveAlertSettings(next);
+    if (r.ok) setValues(r.alerts.settings);
+    onSaved(r.ok ? true : r.error);
+  }
+
+  return (
+    <div className="inline-form">
+      <button type="button" className="quiet" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {open ? '▾' : '▸'} 價格提醒
+      </button>
+      {open && values && (
+        <form className="form thresholds" onSubmit={e => e.preventDefault()}>
+          <label>
+            單日漲跌超過
+            <span className="unit-input">
+              <input className="num" inputMode="decimal" defaultValue={values.day_pct} onBlur={e => e.target.value !== values.day_pct && void save({ day_pct: e.target.value })} />
+              <span className="muted">%</span>
+            </span>
+          </label>
+          <label>
+            一週漲跌超過
+            <span className="unit-input">
+              <input className="num" inputMode="decimal" defaultValue={values.week_pct} onBlur={e => e.target.value !== values.week_pct && void save({ week_pct: e.target.value })} />
+              <span className="muted">%</span>
+            </span>
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={values.watchlist} onChange={e => void save({ watchlist: e.target.checked })} />
+            自選股也提醒
+          </label>
+        </form>
+      )}
+    </div>
+  );
+}
 
 /** 健檢 thresholds, collapsed by default. */
 function AdviceThresholds({ onSaved }: { onSaved(ok: true | string): void }) {

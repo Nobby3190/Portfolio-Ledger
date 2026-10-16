@@ -1,6 +1,6 @@
 // Typed access to the Python side (pywebview js_api, see src/portfolio_ledger/api.py).
 import type {
-  AccountInput, Advice, BacktestResult, GroupInput, LifePlanInput, MonthReport, Plan, PlanParams, Preview, RecurringFreq,
+  AccountInput, Advice, Alerts, BacktestResult, Dividends, Fundamentals, Note, NoteInput, WatchRow, GroupInput, LifePlanInput, MonthReport, Plan, PlanParams, Preview, RecurringFreq,
   RecurringInput, RecurringRule, Settings, State, TxFields, YearReport,
 } from './types';
 
@@ -36,6 +36,20 @@ interface PyApi {
   delete_life_plan(id: number): Promise<Res<{ plan: Plan }>>;
   get_advice(): Promise<Res<{ advice: Advice }>>;
   save_advice_thresholds(values: Record<string, string>): Promise<Res<{ advice: Advice }>>;
+  get_dividends(): Promise<Res<{ dividends: Dividends }>>;
+  get_fundamentals(symbol: string, force: boolean): Promise<Res<{ fundamentals: Fundamentals }>>;
+  copy_text(text: string): Promise<Res<object>>;
+  copy_holdings(): Promise<Res<{ text: string }>>;
+  export_holdings_md(): Promise<Res<{ path: string }>>;
+  get_watchlist(): Promise<Res<{ watchlist: WatchRow[] }>>;
+  add_watch(symbol: string): Promise<Res<{ symbol: string; watchlist: WatchRow[] }>>;
+  remove_watch(symbol: string): Promise<Res<{ watchlist: WatchRow[] }>>;
+  get_note(symbol: string): Promise<Res<{ note: Note | null }>>;
+  save_note(data: NoteInput): Promise<Res<{ note: Note | null }>>;
+  mark_reviewed(symbol: string): Promise<Res<{ note: Note | null }>>;
+  get_alerts(): Promise<Res<{ alerts: Alerts }>>;
+  dismiss_alert(key: string): Promise<Res<{ alerts: Alerts }>>;
+  save_alert_settings(values: Partial<Record<'day_pct' | 'week_pct' | 'watchlist', string | boolean>>): Promise<Res<{ alerts: Alerts }>>;
   backtest(symbol: string, start: string, amount: string): Promise<Res<{ result: BacktestResult }>>;
   refresh(): Promise<Res<object>>;
   export_csv(): Promise<Res<{ path: string }>>;
@@ -105,6 +119,21 @@ export const api = {
   deleteLifePlan: async (id: number) => (await py()).delete_life_plan(id),
   advice: async () => (await py()).get_advice(),
   saveAdviceThresholds: async (values: Record<string, string>) => (await py()).save_advice_thresholds(values),
+  dividends: async () => (await py()).get_dividends(),
+  fundamentals: async (symbol: string, force = false) => (await py()).get_fundamentals(symbol, force),
+  copyText: async (text: string) => (await py()).copy_text(text),
+  copyHoldings: async () => (await py()).copy_holdings(),
+  exportHoldingsMd: async () => (await py()).export_holdings_md(),
+  watchlist: async () => (await py()).get_watchlist(),
+  addWatch: async (symbol: string) => (await py()).add_watch(symbol),
+  removeWatch: async (symbol: string) => (await py()).remove_watch(symbol),
+  note: async (symbol: string) => (await py()).get_note(symbol),
+  saveNote: async (data: NoteInput) => (await py()).save_note(data),
+  markReviewed: async (symbol: string) => (await py()).mark_reviewed(symbol),
+  alerts: async () => (await py()).get_alerts(),
+  dismissAlert: async (key: string) => (await py()).dismiss_alert(key),
+  saveAlertSettings: async (values: Partial<Record<'day_pct' | 'week_pct' | 'watchlist', string | boolean>>) =>
+    (await py()).save_alert_settings(values),
   backtest: async (symbol: string, start: string, amount: string) => (await py()).backtest(symbol, start, amount),
   refresh: async () => (await py()).refresh(),
   exportCsv: async () => (await py()).export_csv(),

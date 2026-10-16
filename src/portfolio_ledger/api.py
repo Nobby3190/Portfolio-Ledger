@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .services import finance, recurring
+from .services import finance, recurring, tracking
 from .services.finance import FinanceError
 from .services.ledger import EntryError, Ledger
 
@@ -199,6 +199,92 @@ class Api:
             return {"advice": finance.advice(self._ledger)}
 
         return _call(run)
+
+    # ── 自選股、投資筆記、價格提醒 ──
+
+    def get_watchlist(self) -> dict[str, Any]:
+        return _call(lambda: {"watchlist": tracking.watchlist(self._ledger)})
+
+    def add_watch(self, symbol: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            sym = tracking.add_watch(self._ledger, symbol)
+            return {"symbol": sym, "watchlist": tracking.watchlist(self._ledger)}
+
+        return _call(run)
+
+    def remove_watch(self, symbol: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            tracking.remove_watch(self._ledger, symbol)
+            return {"watchlist": tracking.watchlist(self._ledger)}
+
+        return _call(run)
+
+    def get_note(self, symbol: str) -> dict[str, Any]:
+        return _call(lambda: {"note": tracking.get_note(self._ledger, symbol)})
+
+    def save_note(self, data: dict[str, Any]) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            tracking.save_note(self._ledger, data)
+            return {"note": tracking.get_note(self._ledger, str(data.get("symbol") or ""))}
+
+        return _call(run)
+
+    def mark_reviewed(self, symbol: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            tracking.mark_reviewed(self._ledger, symbol)
+            return {"note": tracking.get_note(self._ledger, symbol)}
+
+        return _call(run)
+
+    def get_alerts(self) -> dict[str, Any]:
+        return _call(lambda: {"alerts": tracking.alerts_report(self._ledger)})
+
+    def dismiss_alert(self, key: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            tracking.dismiss_alert(self._ledger, key)
+            return {"alerts": tracking.alerts_report(self._ledger)}
+
+        return _call(run)
+
+    def save_alert_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            tracking.save_alert_settings(self._ledger, values)
+            return {"alerts": tracking.alerts_report(self._ledger)}
+
+        return _call(run)
+
+    # ── 財報快照、ai-berkshire ──
+
+    def get_fundamentals(self, symbol: str, force: bool = False) -> dict[str, Any]:
+        return _call(lambda: {"fundamentals": tracking.fundamentals_report(self._ledger, symbol, force)})
+
+    def copy_text(self, text: str) -> dict[str, Any]:
+        def run() -> None:
+            subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
+
+        return _call(run)
+
+    def copy_holdings(self) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            line = tracking.holdings_line(self._ledger)
+            subprocess.run(["pbcopy"], input=line.encode("utf-8"), check=True)
+            return {"text": line}
+
+        return _call(run)
+
+    def export_holdings_md(self) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            dest = Path.home() / "Downloads" / f"Portfolio-Ledger-持倉-{datetime.now():%Y%m%d-%H%M}.md"
+            dest.write_text(tracking.holdings_markdown(self._ledger), encoding="utf-8")
+            subprocess.run(["open", "-R", str(dest)], check=False)
+            return {"path": str(dest)}
+
+        return _call(run)
+
+    # ── 股利 ──
+
+    def get_dividends(self) -> dict[str, Any]:
+        return _call(lambda: {"dividends": finance.dividend_report(self._ledger)})
 
     def backtest(self, symbol: str, start: str, amount: str) -> dict[str, Any]:
         return _call(lambda: {"result": finance.backtest(self._ledger, symbol, start, amount)})

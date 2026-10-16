@@ -18,6 +18,9 @@ export interface Holding {
   unrealized_pct: string | null;
   realized: string | null;
   dividends: string | null;
+  dividends_ttm: string | null; // last 12 months, TWD
+  yield_on_cost: string | null; // last 12 months ÷ cost
+  xirr: string | null; // annualized; null under a year of history
   day_change: string;
   day_pct: string | null;
   sign: Sign;
@@ -138,6 +141,7 @@ export interface State {
   total_return: string;
   total_return_pct: string | null;
   return_sign: Sign;
+  xirr: string | null; // annualized return of all holdings; null under a year of history
   allocation: { label: string; value: string; ratio: number }[];
   allocation_groups: {
     groups: { key: 'invest' | 'cash'; label: string; value: string; ratio: number; items: { label: string; value: string; ratio: number }[] }[];
@@ -429,6 +433,98 @@ export interface Advice {
   thresholds: Record<string, string>;
 }
 
+/** 投資筆記 (tracking.note_view): the user's own words, one per symbol. */
+export interface Note {
+  symbol: string;
+  thesis: string;
+  red_lines: string[];
+  band_low: string | null;
+  band_high: string | null;
+  review_months: number | null;
+  last_review: string | null;
+  review_due: string | null;
+  updated_at: string;
+  input: NoteInput;
+}
+
+export interface NoteInput {
+  symbol: string;
+  thesis: string;
+  red_lines: string; // one per line
+  band_low: string;
+  band_high: string;
+  review_months: string;
+  last_review: string;
+}
+
+/** 自選股 row (tracking.watchlist). */
+export interface WatchRow {
+  symbol: string;
+  name: string;
+  market: string;
+  currency: string;
+  kind: string;
+  close: string | null;
+  close_date: string | null;
+  day_pct: string | null;
+  day_sign: Sign;
+  week_pct: string | null;
+  week_sign: Sign;
+  band: string | null;
+  band_where: string | null;
+  band_side: -1 | 0 | 1;
+  note: Note | null;
+}
+
+export interface AlertItem extends AdviceItem {
+  symbol: string;
+  name: string;
+  held: boolean;
+  red_lines: string[];
+  kind: 'dismiss' | 'review'; // review: goes away with 標記為已檢查
+}
+
+export interface Alerts {
+  items: AlertItem[];
+  settings: { day_pct: string; week_pct: string; watchlist: boolean };
+}
+
+/** 財報快照 (tracking.fundamentals_report): public numbers and the 7 去劣 checks; never a verdict. */
+export interface Fundamentals {
+  symbol: string;
+  name: string;
+  available: boolean;
+  reason?: string; // when not available (ETF, 港股…)
+  currency?: string;
+  unit?: string; // 台幣億, 美元百萬
+  table?: { years: string[]; rows: { key: string; label: string; values: (string | null)[] }[] } | null;
+  checks?: { key: string; label: string; rule: string; value: string | null; status: 'pass' | 'fail' | 'na'; note: string }[];
+  valuation?: { pe: string | null; pb: string | null; dividend_yield: string | null } | null;
+  source?: string | null;
+  fetched_at?: string | null;
+  error?: string | null;
+  commands?: { label: string; text: string }[];
+}
+
+/** 股利 card (finance.dividend_report). */
+export interface Dividends {
+  has: boolean;
+  ttm: string;
+  ytd: string;
+  yield_on_cost: string | null;
+  cover: string | null; // last 12 months of dividends ÷ a year of spending
+  by_symbol: { symbol: string; name: string; amount: string; ratio: number; held: boolean }[];
+  upcoming: {
+    symbol: string;
+    name: string;
+    ex_date: string;
+    pay_date: string | null;
+    cash: string | null; // per share; null = not announced
+    currency: string;
+    estimate: string | null;
+  }[];
+}
+
 export interface Plan {
   goals: Goal[];
   life_plans: LifePlan[];
@@ -504,6 +600,7 @@ export interface TxFields {
   date: string;
   note: string;
   backfill?: boolean; // 買進 that only adds the holding (cash already reflects it)
+  gross?: boolean; // 股利 typed before 預扣稅／二代健保
   line?: string;
 }
 

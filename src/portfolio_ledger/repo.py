@@ -6,9 +6,10 @@ import json
 import sqlite3
 from collections.abc import Iterable
 from decimal import Decimal
+from typing import Any
 
 from .db import Db
-from .models import Account, Category, Goal, LifePlan, Recurring, Security, Tx
+from .models import Account, Category, Goal, LifePlan, Note, Recurring, Security, Tx
 
 
 def _d(v: str | None) -> Decimal | None:
@@ -99,7 +100,19 @@ def _security(r: sqlite3.Row) -> Security:
         last_close=_d(r["last_close"]),
         prev_close=_d(r["prev_close"]),
         last_date=r["last_date"],
+        pe=_d(r["pe"]),
+        pb=_d(r["pb"]),
+        dividend_yield=_d(r["dividend_yield"]),
     )
+
+
+def put_valuations(db: Db, rows: Iterable[tuple[str, Decimal | None, Decimal | None, Decimal | None]]) -> None:
+    """rows: (symbol, 本益比, 股價淨值比, 殖利率 %)."""
+    with db.write() as c:
+        c.executemany(
+            "UPDATE securities SET pe = ?, pb = ?, dividend_yield = ? WHERE symbol = ?",
+            [(_s(pe), _s(pb), _s(y), s) for s, pe, pb, y in rows],
+        )
 
 
 def get_security(db: Db, symbol: str) -> Security | None:
@@ -471,6 +484,130 @@ def fx_sell_on(db: Db, currency: str, date: str) -> Decimal | None:
         (currency, date),
     )
     return Decimal(rows[0]["sell"]) if rows else None
+
+
+# ── 除權息 ───────────────────────────────────────────────────────────────
+
+
+def put_dividend_events(db: Db, rows: Iterable[tuple[str, str, Decimal | None, str | None]]) -> None:
+    """rows: (symbol, ex date, cash per share or None, pay date or None). A later feed without the
+    amount never erases one already known."""
+    with db.write() as c:
+        c.executemany(
+            "INSERT INTO dividend_events (symbol, ex_date, cash, pay_date) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(symbol, ex_date) DO UPDATE SET cash = COALESCE(excluded.cash, cash),"
+            " pay_date = COALESCE(excluded.pay_date, pay_date)",
+            [(s, d, _s(cash), pay) for s, d, cash, pay in rows],
+        )
+
+
+def dividend_events(db: Db, symbols: Iterable[str], start: str, end: str) -> list[tuple[str, str, Decimal | None, str | None]]:
+    """(symbol, ex date, cash per share, pay date) with start <= ex date <= end, earliest first."""
+    symbols = list(symbols)
+    if not symbols:
+        return []
+    marks = ",".join("?" * len(symbols))
+    rows = db.query(
+        f"SELECT * FROM dividend_events WHERE symbol IN ({marks}) AND ex_date BETWEEN ? AND ? ORDER BY ex_date, symbol",
+        (*symbols, start, end),
+    )
+    return [(r["symbol"], r["ex_date"], _d(r["cash"]), r["pay_date"]) for r in rows]
+
+
+# ── 自選股、投資筆記、提醒 ─────────────────────────────────────────────────
+
+
+def list_watchlist(db: Db) -> list[str]:
+    return [r["symbol"] for r in db.query("SELECT symbol FROM watchlist ORDER BY sort, added_at, symbol")]
+
+
+def add_watch(db: Db, symbol: str, added_at: str) -> None:
+    with db.write() as c:
+        nxt = c.execute("SELECT COALESCE(MAX(sort), 0) + 1 FROM watchlist").fetchone()[0]
+        c.execute("INSERT OR IGNORE INTO watchlist (symbol, added_at, sort) VALUES (?, ?, ?)", (symbol, added_at, nxt))
+
+
+def remove_watch(db: Db, symbol: str) -> None:
+    with db.write() as c:
+        c.execute("DELETE FROM watchlist WHERE symbol = ?", (symbol,))
+
+
+def _note(r: sqlite3.Row) -> Note:
+    return Note(
+        r["symbol"], r["thesis"], r["red_lines"], _d(r["band_low"]), _d(r["band_high"]), r["review_months"],
+        r["last_review"], r["created_at"], r["updated_at"],
+    )  # fmt: skip
+
+
+def get_note(db: Db, symbol: str) -> Note | None:
+    rows = db.query("SELECT * FROM notes WHERE symbol = ?", (symbol,))
+    return _note(rows[0]) if rows else None
+
+
+def list_notes(db: Db) -> dict[str, Note]:
+    return {r["symbol"]: _note(r) for r in db.query("SELECT * FROM notes")}
+
+
+def save_note(db: Db, n: Note) -> None:
+    with db.write() as c:
+        c.execute(
+            "INSERT INTO notes (symbol, thesis, red_lines, band_low, band_high, review_months, last_review, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(symbol) DO UPDATE SET thesis = excluded.thesis,"
+            " red_lines = excluded.red_lines, band_low = excluded.band_low, band_high = excluded.band_high,"
+            " review_months = excluded.review_months, last_review = excluded.last_review, updated_at = excluded.updated_at",
+            (n.symbol, n.thesis, n.red_lines, _s(n.band_low), _s(n.band_high), n.review_months, n.last_review,
+             n.created_at, n.updated_at),
+        )  # fmt: skip
+
+
+def delete_note(db: Db, symbol: str) -> None:
+    with db.write() as c:
+        c.execute("DELETE FROM notes WHERE symbol = ?", (symbol,))
+
+
+def seen_alerts(db: Db) -> set[str]:
+    return {r["key"] for r in db.query("SELECT key FROM alert_seen")}
+
+
+def mark_alert_seen(db: Db, key: str, date: str) -> None:
+    with db.write() as c:
+        c.execute("INSERT OR REPLACE INTO alert_seen (key, date) VALUES (?, ?)", (key, date))
+        c.execute("DELETE FROM alert_seen WHERE date < date(?, '-60 days')", (date,))  # keys carry a date; old ones never recur
+
+
+# ── 財報快照 ──────────────────────────────────────────────────────────────
+
+
+def put_fundamentals(db: Db, symbol: str, annual: dict[str, dict[str, Decimal]], currency: str | None, source: str, fetched_at: str) -> None:
+    with db.write() as c:
+        c.execute("DELETE FROM fundamentals WHERE symbol = ?", (symbol,))
+        c.executemany(
+            "INSERT INTO fundamentals (symbol, period, field, value, currency) VALUES (?, ?, ?, ?, ?)",
+            [(symbol, y, f, str(v), currency) for y, row in annual.items() for f, v in row.items()],
+        )
+        c.execute("INSERT OR REPLACE INTO fund_meta (symbol, fetched_at, source, error) VALUES (?, ?, ?, NULL)", (symbol, fetched_at, source))
+
+
+def fundamentals_error(db: Db, symbol: str, error: str, fetched_at: str, source: str) -> None:
+    """Keep whatever was stored; remember the failure (and when) so it isn't retried on every open."""
+    with db.write() as c:
+        c.execute(
+            "INSERT INTO fund_meta (symbol, fetched_at, source, error) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(symbol) DO UPDATE SET error = excluded.error, fetched_at = excluded.fetched_at",
+            (symbol, fetched_at, source, error),
+        )
+
+
+def get_fundamentals(db: Db, symbol: str) -> tuple[dict[str, dict[str, Decimal]], str | None, dict[str, Any] | None]:
+    """(annual figures, currency, meta {fetched_at, source, error})."""
+    annual: dict[str, dict[str, Decimal]] = {}
+    currency = None
+    for r in db.query("SELECT * FROM fundamentals WHERE symbol = ?", (symbol,)):
+        annual.setdefault(r["period"], {})[r["field"]] = Decimal(r["value"])
+        currency = r["currency"] or currency
+    rows = db.query("SELECT fetched_at, source, error FROM fund_meta WHERE symbol = ?", (symbol,))
+    meta = dict(rows[0]) if rows else None
+    return annual, currency, meta
 
 
 # ── snapshots & settings ─────────────────────────────────────────────────

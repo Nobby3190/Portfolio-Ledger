@@ -25,9 +25,9 @@ import httpx
 from .. import repo
 from ..db import Db
 from ..models import ACCOUNT_TYPES, SPENDING_TYPES, TX_KINDS, Account, Category, Security, Tx
-from ..providers import cathay, twse, yahoo
+from ..providers import cathay, finmind, twse, yahoo
 from ..providers.base import ProviderError, make_client
-from . import fees, fmt, planner
+from . import dividends, fees, fmt, planner
 from .portfolio import Book, PortfolioError, replay
 from .quick import CATEGORY_KINDS, FIELD_NAMES, Command, ParseError, format_command, parse
 
@@ -673,6 +673,13 @@ class Ledger:
         elif cmd.action == "cash_dividend":
             assert cmd.amount is not None
             amount = cmd.amount
+            if cmd.gross:  # 稅前: take off 預扣稅／二代健保 (or the 稅 written); what's stored is what arrived
+                assert sec is not None
+                auto, _ = dividends.dividend_tax(cmd.amount, sec.market, cur)
+                tax = cmd.tax if cmd.tax is not None else auto
+                if tax > cmd.amount:
+                    raise EntryError("稅比股利還多，請確認數字")
+                amount = cmd.amount - tax
         elif cmd.action in ("stock_dividend", "split"):
             qty = cmd.qty
             amount = ZERO
@@ -845,7 +852,10 @@ class Ledger:
             parts.append(f"1 股變 {fmt.qty(t.qty)} 股")
         if t.fee:
             parts.append(f"手續費 {fmt.money(t.fee, cur)}")
-        if t.tax:
+        if t.tax and t.kind == "cash_dividend":
+            label = dividends.dividend_tax(t.amount + t.tax, d.security.market, cur)[1] if d.security else None
+            parts.append(f"稅前 {fmt.money(t.amount + t.tax, cur)} − {label or '稅'} {fmt.money(t.tax, cur)}")
+        elif t.tax:
             parts.append(f"證交稅 {fmt.money(t.tax, cur)}")
         if t.fx_rate is not None:
             parts.append(f"匯率 {t.fx_rate}")
@@ -1026,6 +1036,10 @@ class Ledger:
             auto_fee, auto_tax = self._auto_fees(sec, acc, t.kind, gross, gross_sec, cross_fx, t.date)
             fee = t.fee if t.fee != auto_fee else None
             tax = t.tax if t.tax != auto_tax else None
+        gross = t.kind == "cash_dividend" and t.tax > 0  # recorded 稅前: edit it the same way
+        if gross and sec is not None and acc is not None:
+            auto_tax, _ = dividends.dividend_tax(t.amount + t.tax, sec.market, acc.currency)
+            tax = t.tax if t.tax != auto_tax else None
         fx = None
         if t.fx_rate is not None and acc is not None:
             on_day = repo.fx_on(self.db, acc.currency, t.date)
@@ -1038,9 +1052,10 @@ class Ledger:
             symbol=t.symbol,
             qty=t.qty,
             price=t.price,
-            amount=abs(t.amount) if t.kind in ("cash_dividend", "deposit", "withdraw") else None,
+            amount=(t.amount + t.tax if gross else abs(t.amount)) if t.kind in ("cash_dividend", "deposit", "withdraw") else None,
             date=t.date,
             account=acc.name if acc else None,
+            gross=gross,
             fee=fee,
             tax=tax,
             fx=fx,
@@ -1086,6 +1101,7 @@ class Ledger:
         holdings: dict[str, dict[str, Any]] = {}
         acc_value: dict[int, Decimal] = {}
         acc_value_twd: dict[int, Decimal] = {}  # holdings + cash per account, for savings goals
+        acc_hold_twd: dict[int, Decimal] = {}  # holdings only, for the 健檢 broker check
         total_return = basis = day_change = ZERO
         missing_fx: set[str] = set()
         for p in book.positions.values():
@@ -1110,12 +1126,13 @@ class Ledger:
                     "cost_currency": acc.currency,
                     "qty": ZERO, "cost": ZERO, "cost_twd": ZERO, "value": ZERO, "value_twd": ZERO,
                     "unrealized_twd": ZERO, "realized_twd": ZERO, "dividends_twd": ZERO,
-                    "day_change_twd": ZERO, "tx_ids": [], "accounts": [],
+                    "day_change_twd": ZERO, "net_twd": ZERO, "tx_ids": [], "accounts": [], "flows": [],
                 },
             )  # fmt: skip
             h["realized_twd"] += p.realized_twd
             h["dividends_twd"] += p.dividends_twd
             h["tx_ids"] += p.tx_ids
+            h["flows"] += p.flows
             if p.qty == 0:
                 continue
             close = sec.last_close if sec else None
@@ -1134,7 +1151,9 @@ class Ledger:
             h["value"] += value
             h["value_twd"] += value * fx_now
             h["unrealized_twd"] += unrealized_twd
+            h["net_twd"] += (value - est_exit) * fx_now  # what selling would bring, for XIRR
             h["accounts"].append(acc.name)
+            acc_hold_twd[p.account_id] = acc_hold_twd.get(p.account_id, ZERO) + value * fx_now
             acc_value[p.account_id] = acc_value.get(p.account_id, ZERO) + (
                 value if sec_cur == acc.currency else (value * fx_now / fx_acc if fx_acc else ZERO)
             )
@@ -1174,6 +1193,7 @@ class Ledger:
         return {
             "classes": classes,
             "acc_value_twd": acc_value_twd,
+            "acc_hold_twd": acc_hold_twd,
             "rate": rate,
             "book": book,
             "holdings": holdings,
@@ -1189,6 +1209,38 @@ class Ledger:
             "txs": txs,
             "acc_by_id": acc_by_id,
         }
+
+    def _paid_dividends(self, v: dict[str, Any]) -> list[dividends.Paid]:
+        """Every cash dividend received, in TWD at the rate on the transaction (or that day's)."""
+        out = []
+        for t in v["txs"]:
+            if t.kind != "cash_dividend" or not t.symbol:
+                continue
+            acc = v["acc_by_id"].get(t.account_id)
+            cur = acc.currency if acc else "TWD"
+            if cur == "TWD":
+                rate: Decimal | None = Decimal(1)
+            elif t.fx_rate is not None:
+                rate = t.fx_rate
+            else:
+                found = repo.fx_on(self.db, cur, t.date)
+                rate = found[0] if found else None
+            if rate is not None:
+                out.append(dividends.Paid(t.date, t.symbol, t.amount * rate))
+        return out
+
+    def _xirr(self, flows: list[tuple[str, Decimal]], value_now: Decimal) -> float | None:
+        """Annualized return of a position's TWD flows plus what selling today would bring.
+        None under a year of history: a few months annualized overstates (same rule as the 回測)."""
+        if not flows:
+            return None
+        today = self.today()
+        if min(d for d, _ in flows) > (today - timedelta(days=365)).isoformat():
+            return None
+        dated = [(Date.fromisoformat(d), float(x)) for d, x in flows]
+        if value_now:
+            dated.append((today, float(value_now)))
+        return planner.xirr(dated)
 
     @staticmethod
     def _asset_classes(v: dict[str, Any]) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
@@ -1250,10 +1302,17 @@ class Ledger:
         settings = self.settings()
         acc_by_id = v["acc_by_id"]
 
+        ttm_start = dividends.ttm_start(self.today())
+        ttm_by: dict[str, Decimal] = {}
+        for d in self._paid_dividends(v):
+            if d.date > ttm_start:
+                ttm_by[d.symbol] = ttm_by.get(d.symbol, ZERO) + d.twd
         holdings = []
         for h in sorted(v["open"], key=lambda h: h["value_twd"], reverse=True):
             sec = v["secs"].get(h["symbol"])
             cur = h["currency"]
+            ttm = ttm_by.get(h["symbol"], ZERO)
+            rate = self._xirr(h["flows"], h["net_twd"])
             holdings.append(
                 {
                     "symbol": h["symbol"],
@@ -1270,6 +1329,9 @@ class Ledger:
                     "unrealized_pct": fmt.pct(h["unrealized_twd"], h["cost_twd"]),
                     "realized": fmt.money(h["realized_twd"], signed=True) if h["realized_twd"] else None,
                     "dividends": fmt.money(h["dividends_twd"]) if h["dividends_twd"] else None,
+                    "dividends_ttm": fmt.money(ttm) if ttm else None,
+                    "yield_on_cost": fmt.pct(ttm, h["cost_twd"]) if ttm and h["cost_twd"] > 0 else None,
+                    "xirr": _annual(rate),
                     "day_change": fmt.money(h["day_change_twd"], signed=True),
                     "day_pct": fmt.pct(sec.last_close - sec.prev_close, sec.prev_close)
                     if sec and sec.last_close is not None and sec.prev_close
@@ -1394,6 +1456,11 @@ class Ledger:
             "total_return": fmt.money(v["total_return"], signed=True),
             "total_return_pct": fmt.pct(v["total_return"], v["basis"]),
             "return_sign": fmt.sign(v["total_return"]),
+            "xirr": _annual(
+                self._xirr(
+                    [f for h in v["holdings"].values() for f in h["flows"]], sum((h["net_twd"] for h in v["open"]), ZERO)
+                )
+            ),
             "allocation": self._allocation(v),
             "allocation_groups": self._allocation_groups(v),
             "history": [{"date": d, "total": str(x)} for d, x in repo.list_snapshots(self.db)],
@@ -1465,6 +1532,7 @@ class Ledger:
             "total": plain(cmd.total),
             "interest": plain(cmd.interest),
             "opening": cmd.opening,
+            "gross": cmd.gross,
             "date": cmd.date or self.today().isoformat(),
             "note": cmd.note,
             "backfill": backfill,
@@ -1602,7 +1670,7 @@ class Ledger:
         errors: list[str] = []
         try:
             book = self._replay(repo.list_txs(self.db))
-            held = {p.symbol for p in book.open_positions()}
+            held = {p.symbol for p in book.open_positions()} | set(repo.list_watchlist(self.db))  # and the 自選股
             known = repo.securities(self.db, held)
             if tw:
                 try:
@@ -1612,13 +1680,31 @@ class Ledger:
                         self.db,
                         [(s.symbol, s.last_date, s.last_close) for s in secs if s.symbol in held and s.last_date and s.last_close is not None],
                     )
+                    # The exchange feed is one day only: fill a month from Yahoo for the 一週 change, once.
+                    tw_known = repo.securities(self.db, held)
+                    self.backfill_prices([x for x in tw_known.values() if x.is_tw and not self._has_week(x)])
                 except ProviderError as e:
                     log.warning("%s", e)
                     errors.append(str(e))
+                try:
+                    repo.put_dividend_events(self.db, [(s, d, c, None) for s, d, c in twse.fetch_ex_dividends(self.client)])
+                    repo.put_valuations(self.db, twse.fetch_valuations(self.client))
+                except ProviderError as e:
+                    log.warning("%s", e)
+                    errors.append(str(e))
+                # 上櫃 has no 除權息預告 feed: FinMind's dividend table, for what is held or watched.
+                since = (self.today() - timedelta(days=400)).isoformat()
+                for sec in repo.securities(self.db, held).values():
+                    if sec.market != "TPEX":
+                        continue
+                    try:
+                        repo.put_dividend_events(self.db, [(sec.symbol, d, c, pay) for d, c, pay in finmind.dividends(self.client, sec.symbol, since)])
+                    except ProviderError as e:
+                        log.info("%s", e)
             if us:
                 for sym in sorted(s for s in held if (sec := known.get(s)) is not None and not sec.is_tw):
                     try:
-                        h = yahoo.chart(self.client, sym)
+                        h = yahoo.chart(self.client, sym, "1mo")  # a month, for the 一週 change
                     except ProviderError as e:
                         log.warning("%s", e)
                         errors.append(str(e))
@@ -1661,6 +1747,25 @@ class Ledger:
                     "running": False,
                 }
 
+    def _has_week(self, sec: Security) -> bool:
+        if not sec.last_date:
+            return True  # nothing to compare with anyway
+        start = (Date.fromisoformat(sec.last_date) - timedelta(days=21)).isoformat()
+        return len(repo.closes_from(self.db, sec.symbol, start)) > 5
+
+    def backfill_prices(self, secs: list[Security]) -> None:
+        """A month of daily closes from Yahoo (2330.TW / 6488.TWO for Taiwan). Taiwan days after the
+        exchange's latest close are dropped: Yahoo's bar for today may be intraday."""
+        for sec in secs:
+            ysym = f"{sec.symbol}.TW" if sec.market == "TWSE" else f"{sec.symbol}.TWO" if sec.market == "TPEX" else sec.symbol
+            try:
+                h = yahoo.chart(self.client, ysym, "1mo")
+            except ProviderError as e:
+                log.info("%s", e)  # only the 一週 change is missing; not worth a footer error
+                continue
+            rows = [(sec.symbol, d, c) for d, c in h.closes if not sec.is_tw or (sec.last_date and d <= sec.last_date)]
+            repo.put_prices(self.db, rows)
+
     # ── export ──────────────────────────────────────────────────────────
 
     def export_csv(self, dest: Path) -> Path:
@@ -1679,6 +1784,13 @@ class Ledger:
                     t.fx_rate if t.fx_rate is not None else "", t.note,
                 ])  # fmt: skip
         return dest
+
+
+def _annual(rate: float | None) -> str | None:
+    """'+8.2%' for an annualized return."""
+    if rate is None:
+        return None
+    return fmt.pct(Decimal(str(round(rate, 6))), Decimal(1))
 
 
 def _positive(v: object, label: str, allow_zero: bool = False) -> Decimal:

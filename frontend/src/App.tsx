@@ -1,27 +1,31 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { Activity } from './components/Activity';
-import { AdviceCard } from './components/Advice';
+import { AdviceButton } from './components/Advice';
+import { AlertsCard } from './components/Alerts';
 import { RecurringPanel, SearchPanel } from './components/Bookkeeping';
 import { Composer, type ComposerOpen } from './components/Composer';
 import { DepositsFx } from './components/DepositsFx';
+import { DividendsCard, DividendsTile } from './components/Dividends';
 import { Holdings } from './components/Holdings';
 import { LoansCard } from './components/Loans';
 import { MoneyView } from './components/MoneyView';
 import { AccountsPanel, SettingsPanel } from './components/Panels';
 import { PlanView } from './components/PlanView';
-import { AllocationCard, NetWorthCard } from './components/Summary';
-import { Icon } from './lib/icons';
+import { AllocationCard, HoldingsTile, NetWorthCard } from './components/Summary';
+import { Icon, type IconName } from './lib/icons';
+import { accountColor } from './lib/institutions';
 import { FreshContext } from './lib/motion';
-import { PrivacyContext } from './lib/privacy';
+import { Money, PrivacyContext } from './lib/privacy';
 import type { State } from './types';
 
+const RAIL_TYPES = ['broker_tw', 'broker_us', 'bank', 'deposit'];
 type Panel = 'accounts' | 'settings' | 'search' | 'recurring' | null;
 type View = 'assets' | 'money' | 'plan';
-const VIEWS: [View, string][] = [
-  ['assets', '資產'],
-  ['money', '收支'],
-  ['plan', '規劃'],
+const VIEWS: [View, string, IconName][] = [
+  ['assets', '資產', 'chart'],
+  ['money', '收支', 'wallet'],
+  ['plan', '規劃', 'flag'],
 ];
 
 export default function App() {
@@ -166,22 +170,42 @@ export default function App() {
   return (
     <PrivacyContext.Provider value={hidden}>
       <div className={`app up-${state.settings.up_color}`}>
-        <header className="topbar">
-          <div className="topbar-in">
+        {/* 大膽版 (2026-10-16): a left rail for the views and accounts replaces the top bar; it folds into a
+            top strip on narrow windows. */}
+        <div className="shell">
+          <aside className="rail">
             <span className="brand" aria-label="帳本 Ledger">
               <span className="brand-mark" aria-hidden />
               帳本
               <span className="brand-en">Ledger</span>
             </span>
-            <nav className="views" aria-label="視圖" style={{ '--i': VIEWS.findIndex(([v]) => v === view) } as React.CSSProperties}>
-              <span className="views-pill" aria-hidden />
-              {VIEWS.map(([v, label], i) => (
-                <button key={v} type="button" className={view === v ? 'on' : ''} aria-current={view === v ? 'page' : undefined} title={`⌘${i + 1}`} onClick={() => setView(v)}>
-                  {label}
+            <nav className="rail-nav" aria-label="視圖">
+              {VIEWS.map(([v, label, icon], i) => (
+                <button key={v} type="button" className={`rail-view rail-${v} ${view === v ? 'on' : ''}`} aria-current={view === v ? 'page' : undefined} title={`⌘${i + 1}`} onClick={() => setView(v)}>
+                  <span className="rail-ic" aria-hidden>
+                    <Icon name={icon} size={16} />
+                  </span>
+                  <span className="rail-label">{label}</span>
                 </button>
               ))}
             </nav>
-            <span className="topbar-actions">
+            <div className="rail-accts">
+              <button type="button" className="rail-h" onClick={() => setPanel('accounts')}>
+                帳戶
+                <span aria-hidden>›</span>
+              </button>
+              {/* investment (券商) and savings (活存、定存) accounts only; cards, cash and loans are in the 帳戶 panel (2026-10-16) */}
+              {state.accounts
+                .filter(a => !a.archived && RAIL_TYPES.includes(a.type))
+                .map(a => (
+                  <button key={a.id} type="button" className="rail-acct" style={{ '--c': accountColor(a) } as React.CSSProperties} onClick={() => setPanel('accounts')}>
+                    <i aria-hidden />
+                    <span className="ellipsis">{a.name}</span>
+                    <Money className="num" value={a.value_twd} />
+                  </button>
+                ))}
+            </div>
+            <div className="rail-foot">
               <button
                 type="button"
                 className="quiet status"
@@ -190,22 +214,29 @@ export default function App() {
               >
                 {q.running ? '更新報價中…' : q.errors.length ? `報價更新失敗（${q.errors.length}）` : quoteLabel(q.latest, q.oldest)}
               </button>
-              <button type="button" className="quiet" onClick={togglePrivacy} aria-pressed={hidden} title="⌘⇧H">
-                {hidden ? '顯示金額' : '隱藏金額'}
-              </button>
-              <button type="button" className="quiet" onClick={() => setPanel('accounts')}>
-                帳戶
-              </button>
-              <button type="button" className="quiet" onClick={() => setPanel('settings')} title="⌘,">
-                設定
-              </button>
+              <span className="rail-tools">
+                <button type="button" className="quiet" onClick={togglePrivacy} aria-pressed={hidden} title="⌘⇧H">
+                  {hidden ? '顯示金額' : '隱藏金額'}
+                </button>
+                <button type="button" className="quiet rail-acct-btn" onClick={() => setPanel('accounts')}>
+                  帳戶
+                </button>
+                <button type="button" className="quiet" onClick={() => setPanel('settings')} title="⌘,">
+                  設定
+                </button>
+              </span>
               <button type="button" className="primary add" onClick={() => setComposer({ editId: null })} title="⌘K">
                 ＋ 記一筆
+                <kbd>⌘K</kbd>
               </button>
-            </span>
-          </div>
-        </header>
+            </div>
+          </aside>
 
+          <div className="main">
+          <header className="view-head">
+            <h1>{VIEWS.find(([v]) => v === view)![1]}</h1>
+            {view === 'assets' && <AdviceButton state={state} />}
+          </header>
         <FreshContext.Provider value={fresh}>
           <main className="page">
             {state.missing_fx.length > 0 && (
@@ -213,8 +244,11 @@ export default function App() {
             )}
             {view === 'assets' && (
               <div className="grid">
-                <NetWorthCard state={state} className="span-7" />
-                <AllocationCard state={state} className="span-5" />
+                <NetWorthCard state={state} className="span-8" />
+                <div className="stack span-4">
+                  <HoldingsTile state={state} />
+                  <DividendsTile state={state} />
+                </div>
                 {state.transactions.length === 0 && state.accounts.length > 0 && <FirstSteps onAdd={() => setComposer({ editId: null })} />}
                 {/* investments first: tracking them is one of the reasons for the app (2026-10-13) */}
                 <Holdings
@@ -230,11 +264,17 @@ export default function App() {
                   totalReturn={state.total_return}
                   totalReturnPct={state.total_return_pct}
                   returnSign={state.return_sign}
+                  xirr={state.xirr}
                   transactions={state.transactions}
+                  today={state.today}
                   onEdit={edit}
                   onBuy={() => setComposer({ editId: null, kind: 'buy' })}
                 />
-                <AdviceCard state={state} />
+                <div className="stack span-4">
+                  <AlertsCard state={state} onToast={text => say(text)} className="" />
+                  <AllocationCard state={state} />
+                </div>
+                <DividendsCard state={state} />
                 <LoansCard state={state} className="span-12" />
                 {state.deposits.length + state.fx_positions.length > 0 ? (
                   <>
@@ -250,6 +290,8 @@ export default function App() {
             {view === 'plan' && <PlanView state={state} />}
           </main>
         </FreshContext.Provider>
+          </div>
+        </div>
 
         {composer && (
           <Composer

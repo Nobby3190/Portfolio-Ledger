@@ -38,6 +38,8 @@ class Position:
     dividends_twd: Decimal = ZERO
     sold_cost_twd: Decimal = ZERO  # cost basis already closed out, for the overall return %
     tx_ids: list[int] = field(default_factory=list)
+    # TWD money in (−) and out (+) of this position by date, for the annualized return (XIRR).
+    flows: list[tuple[str, Decimal]] = field(default_factory=list)
 
     @property
     def avg_cost(self) -> Decimal:
@@ -93,6 +95,7 @@ def replay(txs: Iterable[Tx], currency_of: dict[int, str], fx: FxLookup) -> Book
             p.qty += qty
             p.cost += cost
             p.cost_twd += cost * rate
+            p.flows.append((t.date, -cost * rate))
         elif t.kind == "holding_in":
             # Backfilled purchase: cash untouched, cost = what was paid (TWD amounts truncated like a buy).
             gross = qty * (t.price or ZERO)
@@ -104,6 +107,7 @@ def replay(txs: Iterable[Tx], currency_of: dict[int, str], fx: FxLookup) -> Book
             p.qty += qty
             p.cost += cost
             p.cost_twd += cost * rate
+            p.flows.append((t.date, -cost * rate))
         elif t.kind == "sell":
             if qty > p.qty:
                 raise PortfolioError(f"{t.date} 賣出 {t.symbol} {fmt_qty(qty)} 股，但當時只持有 {fmt_qty(p.qty)} 股")
@@ -115,11 +119,13 @@ def replay(txs: Iterable[Tx], currency_of: dict[int, str], fx: FxLookup) -> Book
             p.realized += t.amount - out
             p.realized_twd += t.amount * rate - out_twd
             p.sold_cost_twd += out_twd
+            p.flows.append((t.date, t.amount * rate))
             if p.qty == 0:  # avoid dust from the division above
                 p.cost = p.cost_twd = ZERO
         elif t.kind == "cash_dividend":
             p.dividends += t.amount
             p.dividends_twd += t.amount * rate
+            p.flows.append((t.date, t.amount * rate))
         elif t.kind == "stock_dividend":
             p.qty += qty
         elif t.kind == "split":

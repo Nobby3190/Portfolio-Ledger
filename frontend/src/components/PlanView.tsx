@@ -4,6 +4,7 @@ import { Money, PrivacyContext, signClass, Trend } from '../lib/privacy';
 import type { BacktestResult, Plan, PlanParams, State } from '../types';
 import { LineChart } from './Charts';
 import { LifePlans } from './LifePlans';
+import { WatchlistCard } from './Watchlist';
 
 export function PlanView({ state }: { state: State }) {
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -32,6 +33,7 @@ export function PlanView({ state }: { state: State }) {
   return (
     <div className="grid">
       {error && <p className="message bad span-12">{error}</p>}
+      <WatchlistCard state={state} />
       <Goals plan={plan} state={state} onPlan={take} />
       <Rebalance plan={plan} onPlan={take} />
       {/* right above the projection it feeds */}
@@ -45,6 +47,10 @@ export function PlanView({ state }: { state: State }) {
 type Take = (r: { ok: true; plan: Plan } | { ok: false; error: string }) => void;
 
 // ── 儲蓄目標 ─────────────────────────────────────────────────────────
+
+const RING = 2 * Math.PI * 40;
+const GOAL_TONES = ['var(--hue-teal)', 'var(--hue-sand)', 'var(--hue-sky)', 'var(--hue-plum)', 'var(--hue-indigo)'];
+const MIX_TONES = ['var(--tone-indigo)', 'var(--tone-sky)', 'var(--tone-teal)', 'var(--tone-plum)', 'var(--tone-sand)'];
 
 function Goals({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take }) {
   const [editing, setEditing] = useState<GoalInput | null>(null);
@@ -76,54 +82,44 @@ function Goals({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take
         <p className="muted">例如「緊急預備金 30 萬」或「買房頭期款 300 萬，2030 年前」。可以選要算現金、現金＋定存、總資產，或自己挑帳戶。</p>
       )}
       {plan.goals.length > 0 && (
-        <div className="table goal-t">
-          <div className="thead" aria-hidden>
-            <span>目標</span>
-            <span>進度</span>
-            <span className="hide-sm">還差</span>
-          </div>
-          {plan.goals.map(g => (
+        // 大膽版: one progress ring per goal, coloured in turn; click to edit
+        <div className="goal-rings">
+          {plan.goals.map((g, i) => (
             <button
               key={g.id}
               type="button"
-              className="trow"
+              className="goal-ring"
+              style={{ '--t': GOAL_TONES[i % GOAL_TONES.length] } as React.CSSProperties}
               onClick={() => (setFormError(null), setEditing({ id: g.id, name: g.name, target: g.target_raw, deadline: g.deadline ?? '', scope: g.scope, account_ids: g.account_ids }))}
             >
-              <span className="cell">
-                <span className="ellipsis">{g.name}</span>
-                <span className="sub ellipsis">
-                  {g.scope === 'accounts' ? g.accounts.join('、') : g.scope_label}
-                  {g.deadline && `　${g.deadline} 前`}
-                </span>
+              <span className="ring">
+                <svg viewBox="0 0 100 100" aria-hidden>
+                  <circle className="track" cx="50" cy="50" r="40" />
+                  <circle className="fill" cx="50" cy="50" r="40" strokeDasharray={`${RING * Math.min(g.ratio, 1)} ${RING}`} transform="rotate(-90 50 50)" />
+                </svg>
+                <span className="num">{Math.round(g.ratio * 100)}%</span>
               </span>
-              <span className="cell r">
-                <span>
-                  <Money className="num" value={g.current} />
-                  <span className="muted"> / </span>
-                  <Money className="num" value={g.target} />
-                </span>
-                <span className="bar-cell" style={{ width: '100%' }}>
-                  <span className="meter" aria-hidden>
-                    <span style={{ width: `${Math.min(g.ratio, 1) * 100}%` }} />
-                  </span>
-                  <span className="num small">{Math.round(g.ratio * 100)}%</span>
-                </span>
+              <span className="goal-name ellipsis">{g.name}</span>
+              <span className="sub num">
+                <Money value={g.current} /> / <Money value={g.target} />
               </span>
-              <span className="cell r hide-sm">
-                {g.done ? (
-                  <span>已達成</span>
-                ) : (
-                  <>
-                    <Money className="num" value={g.left} />
-                    {g.per_month && (
-                      <span className="sub">
-                        每月存 <Money className="num" value={g.per_month} />
-                      </span>
-                    )}
-                    {g.overdue && <span className="sub warn">已過期限</span>}
-                  </>
-                )}
+              <span className="sub ellipsis">
+                {g.scope === 'accounts' ? g.accounts.join('、') : g.scope_label}
+                {g.deadline && `・${g.deadline} 前`}
               </span>
+              {g.done ? (
+                <span className="sub strong">已達成</span>
+              ) : g.overdue ? (
+                <span className="sub warn">已過期限</span>
+              ) : g.per_month ? (
+                <span className="sub">
+                  每月存 <Money className="num" value={g.per_month} />
+                </span>
+              ) : (
+                <span className="sub">
+                  還差 <Money className="num" value={g.left} />
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -242,6 +238,23 @@ function Rebalance({ plan, onPlan }: { plan: Plan; onPlan: Take }) {
         <h2 id="rb-h">目標配置</h2>
         <span className="aside">改目標比例後按 Enter</span>
       </header>
+      {/* 大膽版: now and target as two stacked bars on the same colours */}
+      <div className="mix">
+        {(['current', 'target'] as const).map(k => (
+          <div key={k} className="mix-row">
+            <span className="muted small">{k === 'current' ? '目前' : '目標'}</span>
+            <span className="mix-bar" role="img" aria-label={plan.rebalance.map(r => `${r.label} ${Math.round(r[k] * 100)}%`).join('，')}>
+              {plan.rebalance.map((r, i) =>
+                r[k] > 0 ? (
+                  <span key={r.label} style={{ flexGrow: r[k], background: MIX_TONES[i % MIX_TONES.length] }}>
+                    {r[k] >= 0.12 ? `${r.label} ${Math.round(r[k] * 100)}%` : ''}
+                  </span>
+                ) : null,
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
       <div className="table rebalance-t">
         <div className="thead" aria-hidden>
           <span>類別</span>

@@ -23,7 +23,13 @@ DEFAULT_THRESHOLDS = {
     "savings_min_pct": 10,  # savings rate below → note
     "deposit_days": 30,  # time deposit maturing within → note
     "near_years": 3,  # plan spending within this many years should sit in cash
+    "fx_pct": 50,  # foreign-currency assets share of net worth → note
+    "market_pct": 80,  # single market share of investments → note
+    "broker_pct": 70,  # single broker share of investments → note
 }
+
+# Below this much invested, one market or one broker is normal; don't nag a new user (DESIGN.md v1.4).
+MIN_INVESTED = 100_000
 
 LEVELS = {"warn": 0, "note": 1, "ok": 2}
 
@@ -40,6 +46,7 @@ class Holding:
     name: str
     value: float  # TWD
     is_fund: bool  # ETF / bond ETF: already diversified
+    market: str = ""  # 台股 / 美股 / 港股 / 海外股
 
 
 @dataclass
@@ -68,6 +75,9 @@ class Inputs:
     loan_payment: float | None = None  # highest monthly payment of active plans with a loan
     loan_plans: list[str] = field(default_factory=list)
     deposits: list[Deposit] = field(default_factory=list)
+    total: float = 0.0  # net worth, TWD
+    foreign: float = 0.0  # foreign-currency cash and holdings, TWD
+    brokers: list[tuple[str, float]] = field(default_factory=list)  # (account, holdings value TWD)
 
 
 def _item(key: str, level: str, title: str, detail: list[Seg], action: list[Seg] | None = None) -> dict[str, Any]:
@@ -128,6 +138,36 @@ def check(i: Inputs, thresholds: dict[str, float] | None = None) -> list[dict[st
             out.append(_item("stock", "note", "單一個股比重偏高", detail))
         else:
             out.append(_item("stock", "ok", "個股分散", [f"最大的個股 {top.name} 佔投資 {_pct(share)}"]))
+
+    # 外幣曝險
+    if i.total > 0 and i.foreign > 0:
+        share = i.foreign / i.total
+        detail = ["外幣資產 ", m(i.foreign), f" 佔總資產 {_pct(share)}"]
+        if share * 100 > t["fx_pct"]:
+            out.append(_item("fx", "note", "外幣資產比重偏高", detail, ["台幣升值 5% 時約少 ", m(i.foreign * 0.05)]))
+        else:
+            out.append(_item("fx", "ok", "外幣比重正常", detail))
+
+    # 市場集中、券商集中
+    if invested >= MIN_INVESTED:
+        markets: dict[str, float] = {}
+        for h in i.holdings:
+            markets[h.market or "其他"] = markets.get(h.market or "其他", 0.0) + h.value
+        label, value = max(markets.items(), key=lambda kv: kv[1])
+        share = value / invested
+        if share * 100 > t["market_pct"]:
+            out.append(_item("market", "note", "投資集中在單一市場", [f"投資 {_pct(share)} 在{label}（", m(value), "）"],
+                             ["新的投入可以考慮其他市場的 ETF"]))  # fmt: skip
+        else:
+            out.append(_item("market", "ok", "市場分散", [f"最多的是{label}，佔投資 {_pct(share)}"]))
+        if i.brokers:
+            name, value = max(i.brokers, key=lambda b: b[1])
+            share = value / invested
+            if share * 100 > t["broker_pct"]:
+                out.append(_item("broker", "note", "投資集中在單一券商", [f"投資 {_pct(share)} 在{name}（", m(value), "）"],
+                                 ["可以考慮把部分投資放到第二家券商"]))  # fmt: skip
+            else:
+                out.append(_item("broker", "ok", "券商分散", [f"最多的是{name}，佔投資 {_pct(share)}"]))
 
     # 短期資金放在股票
     if i.needs:

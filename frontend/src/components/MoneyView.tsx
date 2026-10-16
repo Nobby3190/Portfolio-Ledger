@@ -1,6 +1,6 @@
 import { type ReactNode, useContext, useEffect, useState } from 'react';
 import { api } from '../api';
-import { categoryIcon, IconBadge, toneOf, txIcon } from '../lib/icons';
+import { categoryIcon, categoryTone, IconBadge, toneOf, txIcon } from '../lib/icons';
 import { Money, PrivacyContext, RollingMoney, Trend } from '../lib/privacy';
 import type { MonthReport, RecurringRule, State } from '../types';
 import { TxList } from './Activity';
@@ -102,6 +102,7 @@ function MonthView({
 
   const ratio = m.budget_ratio ?? 0;
   const thisMonth = state.today.slice(0, 7);
+  const tabTop = Math.max(1, ...m.tabs.map(t => t.expense));
   return (
     <div className="grid">
       {bar}
@@ -117,6 +118,10 @@ function MonthView({
             aria-current={t.month === m.month ? 'true' : undefined}
             onClick={() => setMonth(t.month === thisMonth ? null : t.month)}
           >
+            {/* each month's spending as a small bar on one scale (大膽版) */}
+            <span className="tab-bar" aria-hidden>
+              <span style={{ height: `${t.future ? 0 : Math.max((t.expense / tabTop) * 100, 4)}%` }} />
+            </span>
             <span>{t.month.slice(0, 4) !== thisMonth.slice(0, 4) ? `${t.month.slice(0, 4)} 年 ` : ''}{t.label}</span>
             {t.future ? <span className="tiny">還沒到</span> : <Money className="num tiny" value={t.expense_s} />}
           </button>
@@ -136,6 +141,7 @@ function MonthView({
               <RollingMoney id="month-expense" value={m.is_future ? (m.budget ?? '—') : m.expense} />
             </h1>
           </div>
+          {m.budget && !m.is_future && <BudgetRing ratio={ratio} state={m.over ? 'over' : ratio >= 0.8 ? 'near' : ''} />}
         </div>
         {/* The number's underline: how much of the budget is gone. */}
         <div className={`budget-line ${m.over ? 'over' : ratio >= 0.8 ? 'near' : ''}`} aria-hidden>
@@ -231,48 +237,34 @@ function MonthView({
             <h2 id="cat-h">支出分類</h2>
             <span className="aside">點「設定」可以給分類每月預算</span>
           </header>
-          <div className="table cat-t">
-            <div className="thead" aria-hidden>
-              <span>分類</span>
-              <span>本月</span>
-              <span>預算</span>
-              <span className="hide-sm">比上月</span>
-            </div>
+          {/* one tile per category, in the category's colour (大膽版); amber still means near or over budget */}
+          <div className="cat-tiles">
             {cats.map(c => {
               const r = c.budget_ratio;
+              const st = r == null ? '' : r > 1 ? 'over' : r >= 0.8 ? 'near' : '';
               return (
-                <div key={c.id} className="trow">
-                  <span className="cell-ic">
+                <div key={c.id} className={`cat-tile ${st}`} style={{ '--t': categoryTone(c.name, 'expense') } as React.CSSProperties}>
+                  <span className="cat-tile-top">
                     <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
-                    <span className="cell">
-                      <span className="ellipsis">{c.name}</span>
-                      {!m.is_future && <span className="sub">佔本月 {Math.round(c.share * 100)}%</span>}
+                    {!m.is_future && <span className="num muted small">{Math.round(c.share * 100)}%</span>}
+                  </span>
+                  <span className="cat-tile-name ellipsis">{c.name}</span>
+                  <Money className="num cat-tile-amt" value={c.spent} />
+                  <span className={`meter ${st}`} aria-hidden>
+                    <span style={{ width: `${r == null ? 0 : Math.min(r, 1) * 100}%` }} />
+                  </span>
+                  <span className="cat-tile-foot">
+                    <span className="cat-tile-budget">
+                      預算 <InlineAmount label={c.budget ? (hidden ? '••••' : c.budget) : '設定'} value={c.budget_raw} onSave={v => saveCategory(c.id, v)} />
                     </span>
+                    {r != null && <span className={`num ${r > 1 ? 'warn' : ''}`}>{Math.round(r * 100)}%</span>}
                   </span>
-                  <span className="cell r">
-                    <Money className="num" value={c.spent} />
-                  </span>
-                  <span className="bar-cell">
-                    {r != null && (
-                      <>
-                        <span className={`meter ${r > 1 ? 'over' : r >= 0.8 ? 'near' : ''}`} aria-hidden>
-                          <span style={{ width: `${Math.min(r, 1) * 100}%` }} />
-                        </span>
-                        <span className={`num small ${r > 1 ? 'warn' : ''}`}>{Math.round(r * 100)}%</span>
-                      </>
-                    )}
-                    <InlineAmount label={c.budget ? (hidden ? '••••' : c.budget) : '設定'} value={c.budget_raw} onSave={v => saveCategory(c.id, v)} />
-                  </span>
-                  <span className="cell r hide-sm">
-                    {!m.is_future && c.delta && c.delta_sign !== 0 ? (
-                      <span className="trend-line">
-                        <Trend sign={c.delta_sign} />
-                        <Money className="num small" value={c.delta} />
-                      </span>
-                    ) : (
-                      <span className="muted small">—</span>
-                    )}
-                  </span>
+                  {!m.is_future && c.delta && c.delta_sign !== 0 && (
+                    <span className="cat-tile-delta trend-line">
+                      比上月 <Trend sign={c.delta_sign} />
+                      <Money className="num" value={c.delta} />
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -393,7 +385,10 @@ function Upcoming({ state, onOpen }: { state: State; onOpen(): void }) {
       <div className="table soon-t">
         {soon.slice(0, 6).map(r => (
           <button key={r.id} type="button" className="trow" onClick={onOpen}>
-            <span className="date num">{r.next_date!.slice(5).replace('-', '/')}</span>
+            <span className="cal" aria-label={r.next_date!}>
+              <small>{Number(r.next_date!.slice(5, 7))} 月</small>
+              <b className="num">{Number(r.next_date!.slice(8))}</b>
+            </span>
             <span className="cell-ic">
               <IconBadge name={txIcon(r.kind, r.category, r.line)} tone={toneOf(r.kind)} />
               <span className="ellipsis">{r.title}</span>
@@ -404,5 +399,21 @@ function Upcoming({ state, onOpen }: { state: State; onOpen(): void }) {
       </div>
       {soon.length > 6 && <p className="note">還有 {soon.length - 6} 筆</p>}
     </section>
+  );
+}
+
+/** The share of the month's budget that is gone, as a 270° ring beside the big number. */
+function BudgetRing({ ratio, state }: { ratio: number; state: string }) {
+  const r = 34;
+  const c = 2 * Math.PI * r;
+  const arc = c * 0.75;
+  return (
+    <span className={`budget-ring ${state}`} aria-hidden>
+      <svg viewBox="0 0 84 84" width="84" height="84">
+        <circle className="track" cx="42" cy="42" r={r} strokeDasharray={`${arc} ${c}`} transform="rotate(135 42 42)" />
+        <circle className="fill" cx="42" cy="42" r={r} strokeDasharray={`${arc * Math.min(ratio, 1)} ${c}`} transform="rotate(135 42 42)" />
+      </svg>
+      <span className="num">{Math.round(ratio * 100)}%</span>
+    </span>
   );
 }

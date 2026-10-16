@@ -111,6 +111,9 @@ class Security:
     last_close: Decimal | None = None
     prev_close: Decimal | None = None
     last_date: str | None = None
+    pe: Decimal | None = None  # 台股上市: 本益比, 股價淨值比, 殖利率 % (TWSE BWIBBU)
+    pb: Decimal | None = None
+    dividend_yield: Decimal | None = None
 
     @property
     def is_tw(self) -> bool:
@@ -135,6 +138,26 @@ class Tx:
     note: str = ""
     recurring_id: int | None = None  # posted by a recurring rule
     balance: Decimal | None = None  # 期初餘額: the account's balance on this date; amount is derived from it
+
+
+@dataclass
+class Note:
+    """投資筆記: why the user bought (or wants to buy), what would make them rethink, and a fair price band.
+    One per symbol, shared by the holding and the watchlist."""
+
+    symbol: str
+    thesis: str = ""
+    red_lines: str = ""  # one per line
+    band_low: Decimal | None = None  # the security's currency
+    band_high: Decimal | None = None
+    review_months: int | None = None  # None = no review reminder
+    last_review: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+    @property
+    def red_line_list(self) -> list[str]:
+        return [x.strip() for x in self.red_lines.splitlines() if x.strip()]
 
 
 RECURRING_FREQS = {"monthly": "每月", "weekly": "每週", "yearly": "每年"}

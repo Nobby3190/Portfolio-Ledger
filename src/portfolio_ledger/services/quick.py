@@ -76,6 +76,7 @@ class Command:
     total: Decimal | None = None  # 補登: the broker app's total cost (account currency, fees included)
     interest: Decimal | None = None  # 還: the bank's interest when it differs from balance × rate ÷ 12
     opening: bool = False  # 存 … 期初: the amount is the account's balance on that date
+    gross: bool = False  # 息 … 稅前: the amount is before 預扣稅／二代健保, which are taken off
     note: str = ""
     missing: tuple[str, ...] = ()  # positional fields not typed yet
 
@@ -166,6 +167,8 @@ def parse(text: str, today: Date) -> Command:
                 raise ParseError("帳戶寫太多個了" if action in ("transfer", "repay") else "只能指定一個帳戶")
         elif low in ("期初", "opening") and action == "deposit":
             cmd.opening = True
+        elif low in ("稅前", "gross") and action == "cash_dividend":
+            cmd.gross = True
         elif (d := parse_date(tok, today)) is not None:
             cmd.date = d
         elif low in _OVERRIDES:
@@ -267,6 +270,7 @@ def format_command(
     total: Decimal | None = None,
     interest: Decimal | None = None,
     opening: bool = False,
+    gross: bool = False,
     note: str = "",
 ) -> str:
     """The inverse of parse(): the line a stored transaction is edited as."""
@@ -282,6 +286,8 @@ def format_command(
         parts.append(_plain(amount))
     if opening:
         parts.append("期初")
+    if gross:
+        parts.append("稅前")
     if category:
         parts.append(category)
     if date:

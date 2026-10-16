@@ -129,7 +129,38 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
               <span className="hide-sm">{y.is_current ? '比去年同期' : `比 ${last} 年`}</span>
             </div>
             {y.categories.map(c => (
-              <div key={c.id} className="trow">
+              // tabIndex: the row's details card (below) opens on keyboard focus too
+              <div key={c.id} className="trow has-tip" tabIndex={0} aria-label={c.name}>
+                {/* The columns can squeeze the name to just its icon, so pointing at a row shows everything
+                    about it in one card (使用者回饋 2026-10-16). Money stays masked in privacy mode. */}
+                <span className="tip row-tip" role="tooltip">
+                  <span className="row-tip-name">
+                    <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
+                    {c.name}
+                    <span className="muted">佔 {Math.round(c.share * 100)}%</span>
+                  </span>
+                  <span className="row-tip-grid">
+                    <span className="muted">全年</span>
+                    <Money className="num" value={c.amount} />
+                    <span className="muted">月平均</span>
+                    <Money className="num" value={c.per_month} />
+                    {c.budget_ratio != null && (
+                      <>
+                        <span className="muted">預算 × 12</span>
+                        <span className={`num ${c.budget_ratio > 1 ? 'warn' : ''}`}>用了 {Math.round(c.budget_ratio * 100)}%</span>
+                      </>
+                    )}
+                    <span className="muted">{y.is_current ? '比去年同期' : `比 ${last} 年`}</span>
+                    {c.delta && c.delta_sign !== 0 ? (
+                      <span className="trend-line">
+                        <Trend sign={c.delta_sign} />
+                        <Money className="num" value={c.delta} />
+                      </span>
+                    ) : (
+                      <span>{c.last ? '持平' : '—'}</span>
+                    )}
+                  </span>
+                </span>
                 <span className="cell-ic">
                   <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
                   <span className="cell">

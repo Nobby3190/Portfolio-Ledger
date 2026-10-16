@@ -81,6 +81,12 @@ const PATHS = {
   ),
   transfer: <path d="M4 8h15M15 4l4 4-4 4M20 16H5M9 12l-4 4 4 4" />,
   check: <path d="M5 12.5 10 17.5 19 7" />,
+  report: (
+    <>
+      <rect x="5" y="4.5" width="14" height="16.5" rx="2" />
+      <path d="M9 3h6v3H9zM8.5 11h7M8.5 14.5h7M8.5 18h4" />
+    </>
+  ),
   dots: (
     <g fill="currentColor" stroke="none">
       <circle cx="6" cy="12" r="1.5" />
@@ -94,6 +100,14 @@ const PATHS = {
       <circle cx="8" cy="8" r="1.4" />
     </>
   ),
+  chart: <path d="M4 19.5h16M6 15l4-4 3 3 5-6.5" />,
+  wallet: (
+    <>
+      <rect x="3" y="7" width="18" height="12.5" rx="2.5" />
+      <path d="M16 13.2h2M5 7l9-3.2 2 3.2" />
+    </>
+  ),
+  flag: <path d="M6 21V4M6 4h11.5l-2.2 4 2.2 4H6" />,
 } satisfies Record<string, ReactNode>;
 
 /** A line icon, or a brand logo (`brand:netflix`, from brands.ts). */
@@ -127,14 +141,39 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   );
 }
 
-/** Tinted square at the start of a row. */
+/** Each category icon's colour (DESIGN.md 2「大膽版」): neighbours of the slate blue, never red/green
+ *  (those mean up/down) or amber (warnings). Income keeps the silver-blue; transfers and cash stay grey. */
+const ICON_TONES: Partial<Record<keyof typeof PATHS, string>> = {
+  bowl: 'sand',
+  bus: 'sky',
+  house: 'indigo',
+  bag: 'plum',
+  ticket: 'plum',
+  medical: 'teal',
+  book: 'sky',
+  shield: 'teal',
+  percent: 'sand',
+  candles: 'indigo',
+  globe: 'sky',
+  hourglass: 'teal',
+  coin: 'teal',
+  card: 'indigo',
+};
+
+/** Solid colour square at the start of a row; brand logos and expenses without a known category use
+ *  the brand slate, income the silver-blue, everything else grey. */
 export function IconBadge({ name, tone = 'neutral' }: { name: IconName; tone?: IconTone }) {
+  const hue = tone === 'income' ? 'income' : (ICON_TONES[name as keyof typeof PATHS] ?? (tone === 'expense' ? 'expense' : 'neutral'));
   return (
-    <span className={`icon-badge ${tone}`}>
+    <span className={`icon-badge ${tone} solid`} style={{ '--t': `var(--tone-${hue})` } as React.CSSProperties}>
       <Icon name={name} />
     </span>
   );
 }
+
+/** The same colour for a category name, for tiles and chips that show no icon. */
+export const categoryTone = (name: string | null, kind: string) =>
+  kind === 'income' ? 'var(--tone-income)' : `var(--tone-${ICON_TONES[categoryIcon(name, kind) as keyof typeof PATHS] ?? 'expense'})`;
 
 const ACCOUNT_ICONS: Record<string, IconName> = {
   broker_tw: 'candles',
