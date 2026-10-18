@@ -4,6 +4,8 @@
 
 設計與規格見 [DESIGN.md](DESIGN.md)。
 
+發佈到 GitHub 給別人下載：見 [RELEASE.md](RELEASE.md)。
+
 打包：`./scripts/build_app.sh` 產生 `dist/帳本 Ledger.app`（加 `--install` 複製到「應用程式」）。Icon 由 `packaging/make_icon.py` 畫出，`./scripts/make_icon.sh` 轉成 `packaging/Ledger.icns`。
 
 ## 開發
