@@ -149,7 +149,37 @@ def _rule_from(lg: Ledger, data: dict[str, Any]) -> Recurring:
         if rule.active and not old.active:  # resuming: skip what fell due while paused
             yesterday = (lg.today() - timedelta(days=1)).isoformat()
             rule.last_date = max(old.last_date or "", yesterday)
+    _check_backfill_overlap(lg, rule)
     return rule
+
+
+def _symbol(line: str, today: Date) -> str | None:
+    """The stock a 定額 rule buys (None for other rules)."""
+    from .ledger import normalize_symbol
+
+    cmd = parse(line, today)
+    return normalize_symbol(cmd.symbol) if cmd.action == "dca" and cmd.symbol else None
+
+
+def dca_rules(lg: Ledger) -> dict[int, tuple[str, Recurring]]:
+    """定額 rules by id, with the symbol each buys."""
+    today = lg.today()
+    return {r.id: (sym, r) for r in repo.list_recurring(lg.db) if r.id is not None and (sym := _symbol(r.line, today))}
+
+
+def _check_backfill_overlap(lg: Ledger, rule: Recurring) -> None:
+    """A 定額 must not post on or before a 補登 of the same stock: that 補登 already holds those shares."""
+    from .ledger import EntryError
+
+    sym = _symbol(rule.line, lg.today())
+    if sym is None or not rule.active:
+        return
+    backfilled = max((t.date for t in repo.list_txs(lg.db) if t.kind == "holding_in" and t.symbol == sym), default=None)
+    due = due_dates(rule, lg.today())
+    if backfilled and due and due[0] <= backfilled:
+        raise EntryError(
+            f"{sym} 在 {backfilled} 有補登持股，已經包含之前定期定額的股數。起始日請設在 {backfilled} 之後，或先修改補登。"
+        )
 
 
 def backfill_count(lg: Ledger, data: dict[str, Any]) -> int:
@@ -169,6 +199,13 @@ def save(lg: Ledger, data: dict[str, Any]) -> int:
     rule.error = None
     repo.save_recurring(lg.db, rule)
     return run_due(lg)
+
+
+def start_dca(lg: Ledger, text: str, freq: str = "monthly") -> int:
+    """記一筆的定期定額＋每月重複: a rule from the line's date, posted now if that close is out, else after it.
+    Returns how many entries were posted."""
+    cmd = parse(text, lg.today())
+    return save(lg, {"line": _undated(lg, text), "freq": freq, "start_date": cmd.date or lg.today().isoformat()})
 
 
 def from_commit(lg: Ledger, text: str, tx_id: int, freq: str = "monthly") -> None:

@@ -3,7 +3,7 @@ import { api } from '../api';
 import { categoryIcon, Icon } from '../lib/icons';
 import { Money } from '../lib/privacy';
 import type { ComposerKind, MoreKind, Preview, State, TxFields } from '../types';
-import { Sheet } from './Panels';
+import { HelpTip, Sheet } from './Panels';
 
 // The composer builds the same one-line command the parser understands (services/quick.py), so
 // preview, fees, validation and editing all go through the tested Python path.
@@ -24,6 +24,14 @@ const MORE: [MoreKind, string][] = [
   ['split', '股票分割'],
   ['repay', '還款'],
 ];
+// 買進 comes three ways: a fill, a fixed amount bought at the close (定額), or a holding from before the ledger (補登).
+type BuyMode = 'normal' | 'dca' | 'backfill';
+const BUY_MODES: [BuyMode, string][] = [
+  ['normal', '一般買進'],
+  ['dca', '定期定額'],
+  ['backfill', '補登'],
+];
+const buyMode = (f: TxFields): BuyMode => (f.dca ? 'dca' : f.backfill ? 'backfill' : 'normal');
 const SPENDING = ['bank', 'cash', 'credit'];
 const DEBT = ['credit', 'loan']; // an opening balance on these is what is owed
 const CHIPS = 8;
@@ -39,7 +47,7 @@ interface Props {
   state: State;
   open: ComposerOpen;
   onClose(): void;
-  onSaved(state: State, message: string): void;
+  onSaved(state: State, message: string, follow?: { label: string; open: ComposerOpen }): void;
 }
 
 function blank(state: State, kind: ComposerKind = 'expense'): TxFields {
@@ -59,6 +67,7 @@ function blank(state: State, kind: ComposerKind = 'expense'): TxFields {
     date: state.today,
     note: '',
     backfill: false,
+    dca: false,
   };
 }
 
@@ -87,6 +96,10 @@ export function toLine(f: TxFields, today: string): string {
       break;
     case 'buy':
     case 'sell': {
+      if (f.kind === 'buy' && f.dca) {
+        add('定額', word(f.symbol), clean(f.amount), acct);
+        break;
+      }
       const total = f.kind === 'buy' && f.backfill && f.total ? clean(f.total) : '';
       add(
         f.kind === 'buy' ? (f.backfill ? '補' : '買') : '賣',
@@ -118,7 +131,10 @@ export function toLine(f: TxFields, today: string): string {
 function missingFields(f: TxFields): string[] {
   const miss: string[] = [];
   const need = (v: string, label: string) => !clean(v) && miss.push(label);
-  if (f.kind === 'buy' || f.kind === 'sell') {
+  if (f.kind === 'buy' && f.dca) {
+    need(f.symbol, '股票代號');
+    need(f.amount, '每期金額');
+  } else if (f.kind === 'buy' || f.kind === 'sell') {
     need(f.symbol, '股票代號');
     need(f.qty, f.backfill ? '總股數' : '股數');
     need(f.price, f.backfill ? '成交均價' : '成交價');
@@ -150,7 +166,7 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
   const [busy, setBusy] = useState(false);
   const [allCats, setAllCats] = useState(false);
   const [newCat, setNewCat] = useState(false);
-  const [repeat, setRepeat] = useState(false);
+  const [repeat, setRepeat] = useState(!!open.fields?.dca && open.editId == null);
   const firstField = useRef<HTMLInputElement>(null);
   const quickField = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
@@ -161,6 +177,9 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
   const opening = f.opening ?? openingAcct?.cash_sign === 0;
   const owed = opening && f.kind === 'more' && f.more === 'deposit' && DEBT.includes(openingAcct?.type ?? '');
   const line = quick.trim() ? quick : toLine({ ...f, opening, amount: owed && clean(f.amount) ? `-${clean(f.amount).replace(/^-/, '')}` : f.amount }, state.today);
+  // A 定期定額 rule may start on a later deduction day; preview what it buys as of today.
+  const laterDca = !quick.trim() && !editing && f.kind === 'buy' && !!f.dca && repeat && f.date > state.today;
+  const previewLine = laterDca ? toLine({ ...f, date: state.today }, state.today) : line;
   const set = (patch: Partial<TxFields>) => {
     setF(prev => ({ ...prev, ...patch }));
     setError(null);
@@ -179,11 +198,11 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
       return;
     }
     const t = setTimeout(async () => {
-      const r = await api.preview(line, open.editId);
+      const r = await api.preview(previewLine, open.editId);
       if (n === seq.current) setPreview(r.ok ? r.preview : { status: 'error', message: r.error });
     }, 140);
     return () => clearTimeout(t);
-  }, [line, open.editId, missingKey]);
+  }, [previewLine, open.editId, missingKey]);
 
   function switchKind(kind: ComposerKind) {
     if (kind === f.kind) return;
@@ -204,8 +223,19 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
     if (!r.ok) return setError(r.error);
     const month = f.date.slice(0, 7);
     const where = !quick.trim() && month !== state.today.slice(0, 7) ? `（記在 ${Number(month.slice(5))} 月，到「收支」切換月份查看）` : '';
-    const again = canRepeat && repeat ? `，之後每月 ${Number(f.date.slice(8))} 日自動記` : '';
-    onSaved(r.state, `${editing ? '已修改' : '已記錄'}：${preview.title}${where}${again}`);
+    const day = Number(f.date.slice(8));
+    if (r.posted !== undefined) {
+      const when = r.posted > 0 ? `（已記入 ${r.posted} 筆）` : '（到扣款日收盤後自動記）';
+      return onSaved(r.state, `已設定定期定額：每月 ${day} 日買 ${word(f.symbol)} ${clean(f.amount)}${when}`);
+    }
+    const again = canRepeat && repeat ? `，之後每月 ${day} 日自動記` : '';
+    const message = `${editing ? '已修改' : '已記錄'}：${preview.title}${where}${again}`;
+    // A 補登 of what 定期定額 bought so far: offer to set up the deductions from next month on.
+    const follow =
+      !editing && !quick.trim() && f.kind === 'buy' && f.backfill
+        ? { label: '設定之後的定期定額', open: { editId: null, fields: { ...blank(state, 'buy'), dca: true, symbol: f.symbol, account: f.account, date: nextMonth(state.today) } } }
+        : undefined;
+    onSaved(r.state, message, follow);
   }
 
   async function remove() {
@@ -224,17 +254,18 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
   const to = accounts.find(a => a.name === f.to_account);
   const crossFx = from && to && from.currency !== to.currency && (from.currency === 'TWD' || to.currency === 'TWD');
   const repay = f.kind === 'more' && f.more === 'repay';
+  const dca = f.kind === 'buy' && !!f.dca;
   const usesAmount =
-    ['expense', 'income', 'transfer', 'cash_dividend'].includes(f.kind) || (f.kind === 'more' && (f.more === 'deposit' || f.more === 'withdraw' || repay));
+    ['expense', 'income', 'transfer', 'cash_dividend'].includes(f.kind) || dca || (f.kind === 'more' && (f.more === 'deposit' || f.more === 'withdraw' || repay));
   // 每月重複 makes a 週期性 rule from this entry (new entries only, and only from the form).
-  const canRepeat = !editing && !quick.trim() && (['expense', 'income', 'transfer'].includes(f.kind) || repay);
+  const canRepeat = !editing && !quick.trim() && (['expense', 'income', 'transfer'].includes(f.kind) || repay || dca);
   const guess = preview.status === 'ready' && !f.category ? preview.guessed_category : null;
   // Taiwan codes are digits (+ optional letter); anything with other letters or a suffix is a 複委託 trade.
   const foreign = !!f.symbol.trim() && !/^\d{4,6}[A-Za-z]?$/.test(f.symbol.trim());
   const usesSymbol = ['buy', 'sell', 'cash_dividend'].includes(f.kind) || (f.kind === 'more' && (f.more === 'stock_dividend' || f.more === 'split'));
 
   return (
-    <Sheet title={editing ? '修改紀錄' : '記一筆'} onClose={onClose} wide>
+    <Sheet title={editing ? '修改紀錄' : '記一筆'} onClose={onClose} wide actions={f.kind === 'buy' ? <BuyHelp /> : undefined}>
       <form
         className="composer"
         onSubmit={e => {
@@ -267,9 +298,30 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
           </div>
         )}
 
+        {f.kind === 'buy' && !editing && (
+          <div className="chips" role="radiogroup" aria-label="買進方式">
+            {BUY_MODES.map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                role="radio"
+                aria-checked={buyMode(f) === k}
+                className={`chip ${buyMode(f) === k ? 'on' : ''}`}
+                onClick={() => {
+                  if (k === buyMode(f)) return;
+                  set({ dca: k === 'dca', backfill: k === 'backfill', price: k === 'backfill' ? '' : f.price, total: '', fee: '', fx: '' });
+                  setRepeat(k === 'dca');
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {usesSymbol && (
           <SymbolField
-            inputRef={usesAmount && !['cash_dividend'].includes(f.kind) ? undefined : firstField}
+            inputRef={usesAmount && !['cash_dividend'].includes(f.kind) && !dca ? undefined : firstField}
             value={f.symbol}
             onChange={symbol => set({ symbol })}
             onPick={(symbol, close) => set({ symbol, price: f.price || (['buy', 'sell'].includes(f.kind) && close ? clean(close) : f.price) })}
@@ -285,16 +337,18 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
           <label className="amount-field">
             <span className="ccy">{f.kind === 'cash_dividend' ? (f.gross ? '稅前' : '實收') : ccy}</span>
             <input
-              ref={f.kind === 'cash_dividend' ? undefined : firstField}
+              ref={f.kind === 'cash_dividend' || dca ? undefined : firstField}
               className="num"
               inputMode="decimal"
-              placeholder={repay ? '空白＝這期月付' : '0'}
+              placeholder={repay ? '空白＝這期月付' : dca ? '每期金額' : '0'}
               value={f.amount}
               aria-label="金額"
               onChange={e => set({ amount: e.target.value })}
             />
           </label>
         )}
+
+        {dca && <p className="muted tiny">股數用扣款日收盤價自動算</p>}
 
         {f.kind === 'cash_dividend' && (
           <label className="backfill">
@@ -321,17 +375,8 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
           </label>
         )}
 
-        {f.kind === 'buy' && (
-          <label className="backfill">
-            <input type="checkbox" checked={!!f.backfill} onChange={e => set({ backfill: e.target.checked, price: e.target.checked ? '' : f.price, total: '' })} />
-            <span>
-              補登過去買的股票
-              <span className="muted tiny">　帳戶現金已經是現在的餘額，這筆只記持股和成本，不再扣款；日期選當初買進那天、成交價填當時的價格</span>
-            </span>
-          </label>
-        )}
 
-        {(f.kind === 'buy' || f.kind === 'sell') && (
+        {(f.kind === 'buy' || f.kind === 'sell') && !dca && (
           <div className="field-row">
             <Field label={f.backfill ? '總股數' : '股數'} hint={foreign ? undefined : '1 張 = 1,000 股'}>
               <input className="num" inputMode="decimal" value={f.qty} placeholder={foreign ? '100' : '1000'} onChange={e => set({ qty: e.target.value })} />
@@ -353,7 +398,7 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
         )}
 
         {f.kind === 'buy' && f.backfill && (
-          <Field label="總成本" hint="國泰 App 庫存的「總成本」，已含手續費和換匯；填了就不用填手續費、匯率">
+          <Field label="總成本" hint="券商 App 庫存的總成本，含手續費">
             <input className="num" inputMode="decimal" value={f.total ?? ''} placeholder="可不填（建議填）" onChange={e => set({ total: e.target.value })} />
           </Field>
         )}
@@ -375,7 +420,7 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
                   key={c.id}
                   type="button"
                   className={`chip ${f.category === c.name ? 'on' : ''} ${guess === c.name ? 'guess' : ''}`}
-                  title={guess === c.name ? '依過去同樣備註的紀錄' : undefined}
+                  title={guess === c.name ? '依過去同樣備註的紀錄' : c.parent_id ? `${cats.find(x => x.id === c.parent_id)?.name ?? ''}・${c.name}` : undefined}
                   onClick={() => set({ category: f.category === c.name ? '' : c.name })}
                 >
                   <Icon name={categoryIcon(c.name, f.kind)} size={14} />
@@ -461,8 +506,8 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
                 placeholder={usesSymbol ? '自動（依代號）' : undefined}
               />
             </Field>
-            <Field label="日期">
-              <input type="date" value={f.date} max={state.today} onChange={e => set({ date: e.target.value || state.today })} />
+            <Field label={dca ? '扣款日' : '日期'}>
+              <input type="date" value={f.date} max={dca && repeat ? undefined : state.today} onChange={e => set({ date: e.target.value || state.today })} />
             </Field>
           </div>
         )}
@@ -670,4 +715,26 @@ function PreviewText({ preview }: { preview: Preview }) {
         </>
       );
   }
+}
+
+/** The same day next month (the 31st falls on a shorter month's last day), as yyyy-mm-dd. */
+function nextMonth(today: string): string {
+  const [y, m, d] = today.split('-').map(Number);
+  const last = new Date(y, m + 1, 0).getDate(); // days in the next month (JS months are 0-based)
+  const ny = m === 12 ? y + 1 : y;
+  const nm = m === 12 ? 1 : m + 1;
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+}
+
+function BuyHelp() {
+  return (
+    <HelpTip label="買進說明">
+      <b>三種買進</b>
+      一般買進：照成交通知填股數和成交價。定期定額：每期固定金額，股數用扣款日收盤價自動算。補登：開始記帳以前就有的持股，不從現金扣款。
+      <b>定期定額怎麼記</b>
+      以前已經買的不用一筆一筆記：用「補登」照券商 App 庫存的總股數、總成本記一筆。之後的用「定期定額」勾「每月重複」，從下一次扣款開始。
+      <b>和券商對帳</b>
+      收盤價和實際成交價會差一點。收到成交通知時，點那筆交易改成實際的股數和價格；或偶爾拿庫存的總股數對一下。
+    </HelpTip>
+  );
 }

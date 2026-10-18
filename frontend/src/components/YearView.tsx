@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api';
 import { categoryIcon, IconBadge } from '../lib/icons';
 import { Money, RollingMoney, signClass, Trend } from '../lib/privacy';
@@ -10,6 +10,7 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
   const [year, setYear] = useState<number | null>(null);
   const [report, setReport] = useState<YearReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [openCat, setOpenCat] = useState<number | null>(null); // the row showing its 子類別
 
   useEffect(() => {
     let live = true;
@@ -128,9 +129,22 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
               <span className="hide-sm">預算 × 12</span>
               <span className="hide-sm">{y.is_current ? '比去年同期' : `比 ${last} 年`}</span>
             </div>
-            {y.categories.map(c => (
-              // tabIndex: the row's details card (below) opens on keyboard focus too
-              <div key={c.id} className="trow has-tip" tabIndex={0} aria-label={c.name}>
+            {y.categories
+              .flatMap(p => [{ c: p, sub: false }, ...(openCat === p.id ? (p.children ?? []).map(k => ({ c: k, sub: true })) : [])])
+              .map(({ c, sub }) => {
+                const kids = c.children?.length ?? 0;
+                const toggle = () => kids > 0 && setOpenCat(openCat === c.id ? null : c.id);
+                return (
+              // tabIndex: the row's details card (below) opens on keyboard focus too; a row with 子類別 opens them on click/Enter
+              <div
+                key={`${sub ? 'sub-' : ''}${c.id}${c.own ? '-own' : ''}`}
+                className={`trow has-tip ${sub ? 'kid-row' : ''} ${kids ? 'has-kids' : ''}`}
+                tabIndex={0}
+                aria-label={c.name}
+                aria-expanded={kids ? openCat === c.id : undefined}
+                onClick={toggle}
+                onKeyDown={e => e.key === 'Enter' && toggle()}
+              >
                 {/* The columns can squeeze the name to just its icon, so pointing at a row shows everything
                     about it in one card (使用者回饋 2026-10-16). Money stays masked in privacy mode. */}
                 <span className="tip row-tip" role="tooltip">
@@ -159,13 +173,21 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
                     ) : (
                       <span>{c.last ? '持平' : '—'}</span>
                     )}
+                    {c.children?.map(k => (
+                      <Fragment key={`${k.id}${k.own ? '-own' : ''}`}>
+                        <span className="muted row-tip-kid">{k.name}</span>
+                        <Money className="num" value={k.amount} />
+                      </Fragment>
+                    ))}
                   </span>
                 </span>
                 <span className="cell-ic">
                   <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
                   <span className="cell">
                     <span className="ellipsis">{c.name}</span>
-                    <span className="sub">佔 {Math.round(c.share * 100)}%</span>
+                    <span className="sub">
+                      佔 {Math.round(c.share * 100)}%{kids > 0 && ` · ${kids} 個子類別 ${openCat === c.id ? '▾' : '▸'}`}
+                    </span>
                   </span>
                 </span>
                 <span className="cell r">
@@ -197,7 +219,8 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
                   )}
                 </span>
               </div>
-            ))}
+                );
+              })}
           </div>
         </section>
       )}

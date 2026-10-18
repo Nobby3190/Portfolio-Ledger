@@ -28,6 +28,15 @@ export interface Holding {
   weight: number;
   accounts: string[];
   tx_ids: number[];
+  dca: HoldingDca | null; // 定期定額 rules for this stock and the buys they posted
+}
+
+export interface HoldingDca {
+  rules: { id: number; amount: string; freq_label: string; next_date: string | null; active: boolean; error: string | null }[];
+  count: number;
+  first_date: string | null;
+  invested: string | null; // TWD, fees included
+  avg_price: string | null;
 }
 
 export interface Closed {
@@ -60,6 +69,7 @@ export interface TxRow {
   twd: string | null;
   value: number; // TWD, unsigned: amount filters and totals in the search panel
   recurring: boolean; // posted by a 週期性 rule
+  dca: boolean; // posted by a 定期定額 rule
 }
 
 export interface AccountRow {
@@ -128,7 +138,7 @@ export interface FxPosition {
 export interface Settings {
   fee_discount: string;
   fee_min: string;
-  privacy: '0' | '1';
+  privacy_lock: '0' | '1'; // open with the amounts hidden; showing them takes Touch ID or the password
   up_color: 'red' | 'green';
   fx_source: 'cathay' | 'market';
 }
@@ -156,7 +166,7 @@ export interface State {
   holdings_unrealized_pct: string | null; // on the open positions' cost, like each row's
   closed: Closed[];
   transactions: TxRow[];
-  categories: { id: number; name: string; kind: 'income' | 'expense'; uses: number }[];
+  categories: Category[];
   deposits: Deposit[];
   loans: Loan[];
   fx_positions: FxPosition[];
@@ -238,23 +248,52 @@ export interface MonthReport {
   over: boolean;
   days_left: number | null;
   per_day: string | null;
-  categories: {
-    id: number;
-    name: string;
-    spent: string;
-    budget: string | null;
-    budget_raw: string;
-    budget_ratio: number | null;
-    share: number;
-    last: string | null;
-    delta: string | null;
-    delta_sign: Sign;
-  }[];
+  categories: MonthCategory[];
   income_categories: { name: string; amount: string }[];
   trend: MonthPoint[]; // 6 months ending at this month at the latest (the chart)
   tabs: MonthPoint[]; // the trend, plus the months still to come this year when it ends at this month
   is_future: boolean;
   has_data: boolean;
+}
+
+export interface Category {
+  id: number;
+  name: string;
+  kind: 'income' | 'expense';
+  uses: number; // last 90 days (the composer's order)
+  count: number; // all time
+  parent_id: number | null; // 子類別: rolls up into this one
+  sort: number;
+}
+
+export interface MonthCategory {
+  id: number;
+  name: string;
+  spent: string;
+  budget: string | null;
+  budget_raw: string;
+  budget_ratio: number | null;
+  share: number; // of the month's spending; a subcategory's, of its parent's
+  last: string | null;
+  delta: string | null;
+  delta_sign: Sign;
+  own?: boolean; // the parent's own part (消費（未細分）)
+  children?: MonthCategory[]; // 子類別, parent's totals include them
+}
+
+export interface YearCategory {
+  id: number;
+  name: string;
+  amount: string;
+  share: number;
+  per_month: string;
+  last: string | null;
+  delta: string | null;
+  delta_sign: Sign;
+  budget: string | null;
+  budget_ratio: number | null;
+  own?: boolean;
+  children?: YearCategory[];
 }
 
 export interface YearChange {
@@ -281,18 +320,7 @@ export interface YearReport {
     net: YearChange | null;
     savings_rate: string | null; // last year's
   };
-  categories: {
-    id: number;
-    name: string;
-    amount: string;
-    share: number;
-    per_month: string;
-    last: string | null;
-    delta: string | null;
-    delta_sign: Sign;
-    budget: string | null;
-    budget_ratio: number | null;
-  }[];
+  categories: YearCategory[];
   income_categories: { name: string; amount: string; share: number }[];
   trend: MonthPoint[];
   worth: { start: string; end: string; change: string; pct: string | null; sign: Sign } | null;
@@ -600,6 +628,7 @@ export interface TxFields {
   date: string;
   note: string;
   backfill?: boolean; // 買進 that only adds the holding (cash already reflects it)
+  dca?: boolean; // 買進 of a fixed amount at the close (定額)
   gross?: boolean; // 股利 typed before 預扣稅／二代健保
   line?: string;
 }

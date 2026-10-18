@@ -9,8 +9,9 @@ type Res<T> = ({ ok: true } & T) | Fail;
 
 interface PyApi {
   get_state(): Promise<Res<{ state: State }>>;
+  unlock(): Promise<{ ok: true } | (Fail & { cancelled?: boolean })>;
   preview(text: string, editId: number | null): Promise<Res<{ preview: Preview }>>;
-  commit(text: string, editId: number | null, repeat: RecurringFreq | null): Promise<Res<{ id: number; state: State }>>;
+  commit(text: string, editId: number | null, repeat: RecurringFreq | null): Promise<Res<{ id: number | null; posted?: number; state: State }>>;
   delete_tx(id: number): Promise<Res<{ state: State }>>;
   tx_line(id: number): Promise<Res<{ line: string }>>;
   tx_fields(id: number): Promise<Res<{ fields: TxFields }>>;
@@ -22,6 +23,8 @@ interface PyApi {
   get_month(month: string | null): Promise<Res<{ month: MonthReport }>>;
   set_budget(categoryId: number, amount: string, month: string | null): Promise<Res<{ month: MonthReport }>>;
   set_total_budget(amount: string, month: string | null): Promise<Res<{ month: MonthReport }>>;
+  rename_category(id: number, name: string): Promise<Res<{ state: State }>>;
+  set_category_parent(id: number, parentId: number | null): Promise<Res<{ state: State }>>;
   get_year(year: number | null): Promise<Res<{ year: YearReport }>>;
   get_recurring(): Promise<Res<{ rules: RecurringRule[] }>>;
   recurring_backfill(data: RecurringInput): Promise<Res<{ count: number }>>;
@@ -61,6 +64,8 @@ declare global {
     pywebview?: { api: PyApi };
     /** Called by Python (app.py) when quotes were refreshed in the background. */
     ledgerChanged?: () => void;
+    /** Called by Python (app.py) when the screen locks or the Mac sleeps: hide the amounts again. */
+    ledgerLock?: () => void;
   }
 }
 
@@ -91,6 +96,7 @@ function py(): Promise<PyApi> {
 
 export const api = {
   state: async () => (await py()).get_state(),
+  unlock: async () => (await py()).unlock(),
   preview: async (text: string, editId: number | null) => (await py()).preview(text, editId),
   commit: async (text: string, editId: number | null, repeat: RecurringFreq | null = null) =>
     (await py()).commit(text, editId, repeat),
@@ -105,6 +111,8 @@ export const api = {
   month: async (month: string | null) => (await py()).get_month(month),
   setBudget: async (id: number, amount: string, month: string | null) => (await py()).set_budget(id, amount, month),
   setTotalBudget: async (amount: string, month: string | null) => (await py()).set_total_budget(amount, month),
+  renameCategory: async (id: number, name: string) => (await py()).rename_category(id, name),
+  setCategoryParent: async (id: number, parentId: number | null) => (await py()).set_category_parent(id, parentId),
   year: async (year: number | null) => (await py()).get_year(year),
   recurring: async () => (await py()).get_recurring(),
   recurringBackfill: async (data: RecurringInput) => (await py()).recurring_backfill(data),

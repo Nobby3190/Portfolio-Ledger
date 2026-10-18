@@ -62,6 +62,7 @@ class Category:
     budget: Decimal | None = None
     sort: int = 0
     archived: bool = False
+    parent_id: int | None = None  # 子類別: the category it rolls up into (one level only)
 
 
 @dataclass

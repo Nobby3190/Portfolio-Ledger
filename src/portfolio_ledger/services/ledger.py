@@ -24,10 +24,10 @@ import httpx
 
 from .. import repo
 from ..db import Db
-from ..models import ACCOUNT_TYPES, SPENDING_TYPES, TX_KINDS, Account, Category, Security, Tx
+from ..models import ACCOUNT_TYPES, RECURRING_FREQS, SPENDING_TYPES, TX_KINDS, Account, Category, Security, Tx
 from ..providers import cathay, finmind, twse, yahoo
 from ..providers.base import ProviderError, make_client
-from . import dividends, fees, fmt, planner
+from . import dividends, fees, fmt, planner, recurring
 from .portfolio import Book, PortfolioError, replay
 from .quick import CATEGORY_KINDS, FIELD_NAMES, Command, ParseError, format_command, parse
 
@@ -62,8 +62,16 @@ class EntryError(ValueError):
     pass
 
 
+DCA_NOTE = "定期定額"  # a 定額 buy priced at the close (an estimate of the broker's fill)
+DCA_CONFIRMED = "定期定額（已對帳）"
+
+
 class QuoteNotYet(EntryError):
     """定額: the close it buys at is not published yet; a recurring rule waits instead of failing."""
+
+    def __init__(self, message: str, day: str) -> None:
+        super().__init__(message)
+        self.day = day
 
 
 def taipei_now() -> datetime:
@@ -110,7 +118,9 @@ class Ledger:
         return {
             "fee_discount": repo.get_setting(self.db, "fee_discount", str(fees.DEFAULT_DISCOUNT)),
             "fee_min": repo.get_setting(self.db, "fee_min", str(fees.DEFAULT_MIN_FEE)),
-            "privacy": repo.get_setting(self.db, "privacy", "0"),
+            # 隱藏金額: '1' = open with the amounts hidden; showing them takes Touch ID or the login password.
+            # A new key (2026-10-18): the old 'privacy' was the on/off state itself and is no longer read.
+            "privacy_lock": repo.get_setting(self.db, "privacy_lock", "1"),
             "up_color": repo.get_setting(self.db, "up_color", "red"),  # Taiwan: red is up
             # Foreign cash valuation: 'cathay' = 國泰世華 即期買進 (like the 國泰 app), 'market' = Yahoo mid-rate.
             "fx_source": repo.get_setting(self.db, "fx_source", "market"),
@@ -121,7 +131,7 @@ class Ledger:
             if key in values:
                 d = _positive(values[key], "手續費折扣" if key == "fee_discount" else "最低手續費", allow_zero=True)
                 repo.set_setting(self.db, key, str(d))
-        for key, allowed in (("privacy", {"0", "1"}), ("up_color", {"red", "green"}), ("fx_source", {"cathay", "market"})):
+        for key, allowed in (("privacy_lock", {"0", "1"}), ("up_color", {"red", "green"}), ("fx_source", {"cathay", "market"})):
             if key in values:
                 if values[key] not in allowed:
                     raise EntryError(f"{key} 的值不正確")
@@ -492,7 +502,7 @@ class Ledger:
             except ProviderError as e:
                 log.info("定額 %s: %s", sec.symbol, e)
         if found is None:
-            raise QuoteNotYet(f"還沒有 {sec.symbol} {day} 的收盤價，收盤後會自動記")
+            raise QuoteNotYet(f"還沒有 {sec.symbol} {day} 的收盤價，收盤後會自動記", day)
         return found
 
     def _build_dca(self, cmd: Command, day: str, keep_id: int | None) -> Draft:
@@ -504,7 +514,7 @@ class Ledger:
         if qty <= 0:
             raise EntryError(f"{fmt.money(cmd.amount, sec.currency)} 不夠買 1 股（收盤 {fmt.price(close)}）")
         buy = Command("buy", symbol=sec.symbol, qty=qty, price=close, date=trade_day, account=cmd.account,
-                      fee=cmd.fee, note=cmd.note or "定期定額")  # fmt: skip
+                      fee=cmd.fee, note=cmd.note or DCA_NOTE)  # fmt: skip
         draft = self._build_trade(buy, trade_day, keep_id)
         draft.dca = cmd.amount
         return draft
@@ -965,6 +975,10 @@ class Ledger:
             if recurring_id is None and edit_id is not None:
                 old = repo.get_tx(self.db, edit_id)
                 recurring_id = old.recurring_id if old else None  # an edited posting stays marked as recurring
+                t = draft.tx
+                if (old and recurring_id in recurring.dca_rules(self) and len(draft.txs) == 1 and t.kind == "buy"
+                        and t.note == DCA_NOTE and (t.qty, t.price) != (old.qty, old.price)):
+                    t.note = DCA_CONFIRMED  # corrected to the broker's fill: no longer the close-price estimate
             for t in draft.txs:
                 t.recurring_id = recurring_id
             if len(draft.txs) == 1 and draft.tx.id is not None:
@@ -1229,6 +1243,40 @@ class Ledger:
                 out.append(dividends.Paid(t.date, t.symbol, t.amount * rate))
         return out
 
+    def _dca_summary(
+        self, h: dict[str, Any], rules: dict[int, tuple[str, Any]], tx_by_id: dict[int | None, Tx], acc_by_id: dict[int, Account]
+    ) -> dict[str, Any] | None:
+        """A holding's 定期定額: its rules and the buys they posted (None when it has neither)."""
+        mine = [r for sym, r in rules.values() if sym == h["symbol"]]
+        buys = [t for i in h["tx_ids"] if (t := tx_by_id.get(i)) and t.kind == "buy" and t.recurring_id in rules]
+        if not mine and not buys:
+            return None
+        invested = ZERO
+        for t in buys:
+            acc = acc_by_id.get(t.account_id)
+            foreign = acc is not None and acc.currency != "TWD"
+            invested += -t.amount * (t.fx_rate if foreign and t.fx_rate is not None else Decimal(1))
+        qty = sum((t.qty or ZERO for t in buys), ZERO)
+        spent = sum(((t.qty or ZERO) * (t.price or ZERO) for t in buys), ZERO)
+        today = self.today()
+        return {
+            "rules": [
+                {
+                    "id": r.id,
+                    "amount": fmt.money(parse(r.line, today).amount, h["cost_currency"]),
+                    "freq_label": RECURRING_FREQS[r.freq],
+                    "next_date": recurring.next_date(r) if r.active else None,
+                    "active": r.active,
+                    "error": r.error,
+                }
+                for r in mine
+            ],
+            "count": len(buys),
+            "first_date": min((t.date for t in buys), default=None),
+            "invested": fmt.money(invested) if buys else None,
+            "avg_price": fmt.price(spent / qty) if qty > 0 else None,
+        }
+
     def _xirr(self, flows: list[tuple[str, Decimal]], value_now: Decimal) -> float | None:
         """Annualized return of a position's TWD flows plus what selling today would bring.
         None under a year of history: a few months annualized overstates (same rule as the 回測)."""
@@ -1307,6 +1355,8 @@ class Ledger:
         for d in self._paid_dividends(v):
             if d.date > ttm_start:
                 ttm_by[d.symbol] = ttm_by.get(d.symbol, ZERO) + d.twd
+        dca_rules = recurring.dca_rules(self)
+        tx_by_id = {t.id: t for t in v["txs"]}
         holdings = []
         for h in sorted(v["open"], key=lambda h: h["value_twd"], reverse=True):
             sec = v["secs"].get(h["symbol"])
@@ -1341,6 +1391,7 @@ class Ledger:
                     "weight": float(h["value_twd"] / v["total"]) if v["total"] > 0 else 0.0,
                     "accounts": sorted(set(h["accounts"])),
                     "tx_ids": h["tx_ids"],
+                    "dca": self._dca_summary(h, dca_rules, tx_by_id, acc_by_id),
                 }
             )
 
@@ -1418,6 +1469,7 @@ class Ledger:
                     "note": t.note,
                     "value": float(abs(t.amount) * (t.fx_rate if t.fx_rate is not None and cur != "TWD" else Decimal(1))),
                     "recurring": t.recurring_id is not None,
+                    "dca": t.recurring_id in dca_rules,
                 }
             )
 
@@ -1504,7 +1556,12 @@ class Ledger:
                 uses[t.category_id] = uses.get(t.category_id, 0) + 1
         cats = [c for c in repo.list_categories(self.db) if not c.archived]
         cats.sort(key=lambda c: (-uses.get(c.id or 0, 0), c.sort, c.id or 0))
-        return [{"id": c.id, "name": c.name, "kind": c.kind, "uses": uses.get(c.id or 0, 0)} for c in cats]
+        count = repo.category_use_counts(self.db)  # all time, for 管理分類
+        return [
+            {"id": c.id, "name": c.name, "kind": c.kind, "uses": uses.get(c.id or 0, 0), "parent_id": c.parent_id,
+             "sort": c.sort, "count": count.get(c.id or 0, 0)}
+            for c in cats
+        ]  # fmt: skip
 
     def tx_fields(self, tx_id: int) -> dict[str, Any]:
         """A stored transaction as the composer's fields (via its command line, so both stay in sync)."""

@@ -320,7 +320,7 @@ def delete_recurring(db: Db, rule_id: int) -> None:
 
 
 def _category(r: sqlite3.Row) -> Category:
-    return Category(r["id"], r["name"], r["kind"], _d(r["budget"]), r["sort"], bool(r["archived"]))
+    return Category(r["id"], r["name"], r["kind"], _d(r["budget"]), r["sort"], bool(r["archived"]), r["parent_id"])
 
 
 def list_categories(db: Db, kind: str | None = None) -> list[Category]:
@@ -346,6 +346,24 @@ def add_category(db: Db, name: str, kind: str) -> int:
 def set_category_budget(db: Db, category_id: int, budget: Decimal | None) -> None:
     with db.write() as c:
         c.execute("UPDATE categories SET budget = ? WHERE id = ?", (_s(budget), category_id))
+
+
+def rename_category(db: Db, category_id: int, name: str, recurring: Iterable[Recurring] = ()) -> None:
+    """Renames a category and saves the recurring rules rewritten to use the new name, together."""
+    with db.write() as c:
+        c.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
+        for r in recurring:
+            c.execute("UPDATE recurring SET line = ? WHERE id = ?", (r.line, r.id))
+
+
+def set_category_parent(db: Db, category_id: int, parent_id: int | None) -> None:
+    with db.write() as c:
+        c.execute("UPDATE categories SET parent_id = ? WHERE id = ?", (parent_id, category_id))
+
+
+def category_use_counts(db: Db) -> dict[int, int]:
+    rows = db.query("SELECT category_id, count(*) AS n FROM transactions WHERE category_id IS NOT NULL GROUP BY category_id")
+    return {r["category_id"]: r["n"] for r in rows}
 
 
 def _goal(r: sqlite3.Row) -> Goal:

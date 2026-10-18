@@ -818,6 +818,7 @@ button.trow:hover {
 
 .holdings-t {
   --cols: minmax(0, 1fr) 76px 92px 104px 118px;
+  align-content: start; /* a short last page keeps its rows at the top of the full-page height */
 }
 
 .tx-t {
@@ -941,6 +942,27 @@ button.trow:hover {
 }
 
 /* ── 收支 ─────────────────────────────────────────────────── */
+
+/* 持股 pages: ‹ 1–7 / 12 檔 › under the table */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pager .quiet {
+  font-size: 18px;
+  padding: 2px 10px;
+}
+
+.pager .quiet:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
 
 .month-nav {
   display: flex;
@@ -2049,6 +2071,29 @@ button.trow:hover {
   border-radius: 10px;
   font-size: 14px;
   box-shadow: 0 10px 30px rgb(0 0 0 / 0.25);
+}
+
+/* A toast with a follow-up button stays long enough to reach it */
+.toast.has-action {
+  animation:
+    toast-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+    toast-out 0.3s ease-in 6.3s forwards;
+}
+
+.toast-action {
+  margin-left: 6px;
+  padding: 3px 10px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background: rgb(255 255 255 / 0.12);
 }
 
 /* ── narrow windows ───────────────────────────────────────── */
@@ -4085,4 +4130,110 @@ body {
 .row-tip-grid > :nth-child(even) {
   text-align: right;
   justify-self: end;
+}
+
+/* 子類別 (2026-10-18): a 消費 tile opens across the row to list its subcategories in aligned columns */
+.cat-tile.open {
+  grid-column: 1 / -1;
+}
+.cat-tile-more {
+  justify-self: start;
+  font-size: 12px;
+  padding: 1px 4px;
+  margin-left: -4px;
+}
+.cat-kids {
+  display: grid;
+  border-top: 1px solid color-mix(in srgb, var(--t) 22%, var(--rule));
+  padding-top: 6px;
+}
+.cat-kid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px 44px minmax(150px, auto);
+  gap: 12px;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 13px;
+}
+.cat-kid > .num {
+  text-align: right;
+}
+.cat-kid-budget {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  font-size: 12px;
+  color: var(--muted);
+}
+.cat-kid-budget .quiet {
+  font-size: 12px;
+  padding: 1px 4px;
+}
+.cat-kid-budget .inline-input {
+  width: 80px;
+}
+@media (max-width: 760px) {
+  .cat-kid {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .cat-kid-budget {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+.trow.has-kids {
+  cursor: pointer;
+}
+.trow.kid-row .cell-ic {
+  padding-left: 20px;
+}
+.trow.kid-row .icon-badge {
+  transform: scale(0.82);
+}
+.row-tip-kid {
+  padding-left: 10px;
+}
+
+/* 管理分類 */
+.cat-admin + .cat-admin {
+  margin-top: 18px;
+}
+.cat-admin h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.cat-admin-head,
+.cat-admin-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 48px;
+  gap: 10px;
+  align-items: center;
+}
+.cat-admin-head {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 0 4px;
+  border-bottom: 1px solid var(--rule);
+}
+.cat-admin-row {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.cat-admin-row.sub .cat-admin-name {
+  padding-left: 26px;
+}
+.cat-admin-name {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.cat-admin-name input {
+  flex: 1;
+  min-width: 0;
+}
+.cat-admin .r {
+  text-align: right;
 }

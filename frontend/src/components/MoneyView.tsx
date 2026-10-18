@@ -9,7 +9,7 @@ import { YearView } from './YearView';
 
 const FLOW_KINDS = ['income', 'expense', 'transfer', 'repay'];
 
-export function MoneyView({ state, onEdit, onPanel }: { state: State; onEdit(id: number): void; onPanel(p: 'search' | 'recurring'): void }) {
+export function MoneyView({ state, onEdit, onPanel }: { state: State; onEdit(id: number): void; onPanel(p: 'search' | 'recurring' | 'categories'): void }) {
   const [mode, setMode] = useState<'month' | 'year'>('month');
   const [month, setMonth] = useState<string | null>(null);
   const bar = (
@@ -57,7 +57,7 @@ function MonthView({
 }: {
   state: State;
   onEdit(id: number): void;
-  onPanel(p: 'search' | 'recurring'): void;
+  onPanel(p: 'search' | 'recurring' | 'categories'): void;
   month: string | null;
   setMonth(m: string | null): void;
   bar: ReactNode;
@@ -65,6 +65,7 @@ function MonthView({
   const hidden = useContext(PrivacyContext);
   const [report, setReport] = useState<MonthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [openCat, setOpenCat] = useState<number | null>(null); // the tile showing its 子類別
 
   // Reload when the month changes or anything was recorded (state is replaced on every save).
   useEffect(() => {
@@ -225,7 +226,7 @@ function MonthView({
             <p>可以先在上面設定每月總預算，或在「支出分類」給各分類設定預算。到了這個月再記帳。</p>
           ) : (
           <p>
-            在上方輸入 <code>支出 120 午餐</code>、<code>收入 60000 薪資</code>；信用卡刷卡記在信用卡帳戶：<code>支出 1200 購物 @信用卡</code>。
+            在上方輸入 <code>支出 120 午餐</code>、<code>收入 60000 薪資</code>；信用卡刷卡記在信用卡帳戶：<code>支出 1200 消費 @信用卡</code>。
           </p>
           )}
         </section>
@@ -235,15 +236,19 @@ function MonthView({
         <section className="card span-7" aria-labelledby="cat-h">
           <header className="card-head">
             <h2 id="cat-h">支出分類</h2>
-            <span className="aside">點「設定」可以給分類每月預算</span>
+            <button type="button" className="quiet aside" onClick={() => onPanel('categories')}>
+              管理分類
+            </button>
           </header>
           {/* one tile per category, in the category's colour (大膽版); amber still means near or over budget */}
           <div className="cat-tiles">
             {cats.map(c => {
               const r = c.budget_ratio;
               const st = r == null ? '' : r > 1 ? 'over' : r >= 0.8 ? 'near' : '';
+              const kids = (c.children ?? []).filter(k => m.is_future || k.spent !== '0' || k.budget);
+              const open = openCat === c.id && kids.length > 0;
               return (
-                <div key={c.id} className={`cat-tile ${st}`} style={{ '--t': categoryTone(c.name, 'expense') } as React.CSSProperties}>
+                <div key={c.id} className={`cat-tile ${st} ${open ? 'open' : ''}`} style={{ '--t': categoryTone(c.name, 'expense') } as React.CSSProperties}>
                   <span className="cat-tile-top">
                     <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
                     {!m.is_future && <span className="num muted small">{Math.round(c.share * 100)}%</span>}
@@ -264,6 +269,35 @@ function MonthView({
                       比上月 <Trend sign={c.delta_sign} />
                       <Money className="num" value={c.delta} />
                     </span>
+                  )}
+                  {kids.length > 0 && (
+                    <button type="button" className="quiet cat-tile-more" aria-expanded={open} onClick={() => setOpenCat(open ? null : c.id)}>
+                      {open ? '收起' : `${kids.length} 個子類別`}
+                    </button>
+                  )}
+                  {open && (
+                    <div className="cat-kids">
+                      {kids.map(k => {
+                        const kr = k.budget_ratio;
+                        return (
+                          <div key={`${k.id}${k.own ? '-own' : ''}`} className="cat-kid">
+                            <span className="ellipsis">{k.name}</span>
+                            <Money className="num" value={k.spent} />
+                            <span className="num muted">{Math.round(k.share * 100)}%</span>
+                            <span className="cat-kid-budget">
+                              {k.own ? (
+                                <span className="muted">—</span>
+                              ) : (
+                                <>
+                                  預算 <InlineAmount label={k.budget ? (hidden ? '••••' : k.budget) : '設定'} value={k.budget_raw} onSave={v => saveCategory(k.id, v)} />
+                                  {kr != null && <span className={`num ${kr > 1 ? 'warn' : ''}`}>{Math.round(kr * 100)}%</span>}
+                                </>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
               );

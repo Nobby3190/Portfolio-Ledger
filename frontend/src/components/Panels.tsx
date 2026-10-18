@@ -1,10 +1,10 @@
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { accountIcon, Icon, type IconName } from '../lib/icons';
+import { accountIcon, categoryIcon, Icon, IconBadge, type IconName } from '../lib/icons';
 import { accountColor, INSTITUTIONS, type Institution, type InstitutionKind, institutionOf, SWATCHES } from '../lib/institutions';
 import { useReducedMotion } from '../lib/motion';
 import { Money } from '../lib/privacy';
-import type { AccountGroup, AccountInput, AccountRow, GroupInput, Settings, State } from '../types';
+import type { AccountGroup, AccountInput, AccountRow, Category, GroupInput, Settings, State } from '../types';
 
 export function Sheet({
   title,
@@ -201,7 +201,7 @@ export function AccountsPanel({ state, onState, onClose }: { state: State; onSta
   const help = (
     <HelpTip label="帳戶說明">
       <b>開始記帳</b>
-      先建立帳戶，再用「＋ 記一筆 → 其他 → 存入現金」記下每個帳戶現在的餘額（勾「期初」），用「買進」勾「補登」補上手上的持股。
+      先建立帳戶，再用「＋ 記一筆 → 其他 → 存入現金」記下每個帳戶現在的餘額（勾「期初」），用「買進 → 補登」補上手上的持股。
       <b>一行輸入</b>
       用 <code>@名稱</code> 指定帳戶，例如 <code>支出 120 午餐 @現金</code>；多幣別帳戶寫 <code>@外幣存款-USD</code>。
       <b>顏色</b>
@@ -802,8 +802,11 @@ export function SettingsPanel({ state, onState, onClose }: { state: State; onSta
           <small className="muted">銀行買進價是現在把外幣換回台幣實際拿到的價格；換外幣時沒填匯率，會用國泰的即期賣出價</small>
         </label>
         <label className="check">
-          <input type="checkbox" checked={s.privacy === '1'} onChange={e => save({ privacy: e.target.checked ? '1' : '0' })} />
-          隱藏金額（⌘⇧H）
+          <input type="checkbox" checked={s.privacy_lock !== '0'} onChange={e => save({ privacy_lock: e.target.checked ? '1' : '0' })} />
+          開啟時隱藏金額
+          <HelpTip label="隱藏金額說明">
+            每次開啟都先隱藏金額，按「顯示金額」（⌘⇧H）要用 Touch ID 或 Mac 的登入密碼。切到別的 app 超過 1 分鐘、縮到 Dock、螢幕鎖定或睡眠時會再隱藏。這只是防旁人看到畫面，資料庫本身沒有加密。
+          </HelpTip>
         </label>
       </form>
       <div className="actions">
@@ -840,6 +843,99 @@ export function SettingsPanel({ state, onState, onClose }: { state: State; onSta
       />
       {msg && <p className={`message ${msg.bad ? 'bad' : 'muted'}`}>{msg.text}</p>}
     </Sheet>
+  );
+}
+
+/** 管理分類: rename a category, or file it under another (子類別, one level). */
+export function CategoriesPanel({ state, onState, onClose }: { state: State; onState(s: State): void; onClose(): void }) {
+  const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
+
+  async function done(r: { ok: true; state: State } | { ok: false; error: string }) {
+    if (!r.ok) return setMsg({ text: r.error, bad: true });
+    setMsg({ text: '已儲存' });
+    onState(r.state);
+  }
+
+  return (
+    <Sheet
+      title="管理分類"
+      onClose={onClose}
+      actions={
+        <HelpTip label="分類說明">
+          子類別的花費會算進上層分類：收支報表只列上層，展開才看到子類別。上層的預算管整組（自己＋子類別），子類別也可以有自己的預算。記帳時直接寫子類別的名稱就好（<code>支出 30 數碼</code>）。只能分一層。改名時，週期性收支裡用到這個分類的也會一起改。
+        </HelpTip>
+      }
+    >
+      {(['expense', 'income'] as const).map(kind => (
+        <CategoryKind key={kind} kind={kind} cats={state.categories} onDone={done} />
+      ))}
+      {msg && <p className={`message ${msg.bad ? 'bad' : 'muted'}`}>{msg.text}</p>}
+    </Sheet>
+  );
+}
+
+function CategoryKind({
+  kind,
+  cats,
+  onDone,
+}: {
+  kind: 'income' | 'expense';
+  cats: Category[];
+  onDone(r: { ok: true; state: State } | { ok: false; error: string }): void;
+}) {
+  const mine = cats.filter(c => c.kind === kind).sort((a, b) => a.sort - b.sort || a.id - b.id);
+  const tops = mine.filter(c => c.parent_id == null || !mine.some(p => p.id === c.parent_id));
+  const rows = tops.flatMap(t => [t, ...mine.filter(c => c.parent_id === t.id)]);
+  return (
+    <section className="cat-admin" aria-label={kind === 'expense' ? '支出分類' : '收入分類'}>
+      <h3>{kind === 'expense' ? '支出' : '收入'}</h3>
+      <div className="cat-admin-head" aria-hidden>
+        <span>名稱</span>
+        <span>放在</span>
+        <span className="r">筆數</span>
+      </div>
+      {rows.map(c => {
+        const sub = !tops.includes(c);
+        const hasKids = mine.some(x => x.parent_id === c.id);
+        return (
+          <div key={c.id} className={`cat-admin-row ${sub ? 'sub' : ''}`}>
+            <span className="cat-admin-name">
+              <IconBadge name={categoryIcon(c.name, kind)} tone={kind} />
+              <input
+                key={c.name} // reset after a rename (or a refused one)
+                defaultValue={c.name}
+                aria-label={`${c.name}的名稱`}
+                onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
+                onBlur={async e => {
+                  const v = e.target.value.trim();
+                  if (v === c.name) return;
+                  const r = await api.renameCategory(c.id, v);
+                  if (!r.ok) e.target.value = c.name;
+                  onDone(r);
+                }}
+              />
+            </span>
+            <select
+              value={c.parent_id ?? ''}
+              disabled={hasKids}
+              title={hasKids ? '底下有子類別，不能再放到別的分類底下' : undefined}
+              aria-label={`${c.name}放在哪個分類底下`}
+              onChange={async e => onDone(await api.setCategoryParent(c.id, e.target.value ? Number(e.target.value) : null))}
+            >
+              <option value="">最上層</option>
+              {tops
+                .filter(t => t.id !== c.id)
+                .map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} 底下
+                  </option>
+                ))}
+            </select>
+            <span className="num muted r">{c.count}</span>
+          </div>
+        );
+      })}
+    </section>
   );
 }
 

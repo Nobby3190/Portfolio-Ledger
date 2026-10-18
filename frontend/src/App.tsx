@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { Activity } from './components/Activity';
 import { AdviceButton } from './components/Advice';
@@ -10,7 +10,7 @@ import { DividendsCard, DividendsTile } from './components/Dividends';
 import { Holdings } from './components/Holdings';
 import { LoansCard } from './components/Loans';
 import { MoneyView } from './components/MoneyView';
-import { AccountsPanel, SettingsPanel } from './components/Panels';
+import { AccountsPanel, CategoriesPanel, SettingsPanel } from './components/Panels';
 import { PlanView } from './components/PlanView';
 import { AllocationCard, HoldingsTile, NetWorthCard } from './components/Summary';
 import { Icon, type IconName } from './lib/icons';
@@ -20,7 +20,7 @@ import { Money, PrivacyContext } from './lib/privacy';
 import type { State } from './types';
 
 const RAIL_TYPES = ['broker_tw', 'broker_us', 'bank', 'deposit'];
-type Panel = 'accounts' | 'settings' | 'search' | 'recurring' | null;
+type Panel = 'accounts' | 'settings' | 'search' | 'recurring' | 'categories' | null;
 type View = 'assets' | 'money' | 'plan';
 const VIEWS: [View, string, IconName][] = [
   ['assets', '資產', 'chart'],
@@ -35,9 +35,12 @@ export default function App() {
   const [view, setViewState] = useState<View>('assets');
   const [composer, setComposer] = useState<ComposerOpen | null>(null);
   const [back, setBack] = useState<Panel>(null); // the panel to return to after editing from it
-  const [toast, setToast] = useState<{ text: string; ok: boolean; n: number } | null>(null);
+  const [toast, setToast] = useState<{ text: string; ok: boolean; n: number; action?: { label: string; run(): void } } | null>(null);
   const [fresh, setFresh] = useState<ReadonlySet<number>>(new Set());
-  const say = useCallback((text: string, ok = true) => setToast(t => ({ text, ok, n: (t?.n ?? 0) + 1 })), []);
+  const say = useCallback(
+    (text: string, ok = true, action?: { label: string; run(): void }) => setToast(t => ({ text, ok, action, n: (t?.n ?? 0) + 1 })),
+    [],
+  );
 
   const setView = useCallback((v: View) => {
     setViewState(v);
@@ -67,7 +70,7 @@ export default function App() {
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2600);
+    const t = setTimeout(() => setToast(null), toast.action ? 6600 : 2600); // time to reach its button
     return () => clearTimeout(t);
   }, [toast]);
 
@@ -90,11 +93,50 @@ export default function App() {
     return () => document.removeEventListener('pointermove', onMove);
   }, []);
 
+  // 隱藏金額 (2026-10-18): hidden on every launch; showing the amounts takes Touch ID or the login password,
+  // and they hide again a minute after switching away, on minimising, or when the screen locks.
+  const [hidden, setHidden] = useState(true);
+  const lockOn = state?.settings.privacy_lock !== '0';
+  const loaded = state != null;
+  useEffect(() => {
+    if (loaded && !lockOn) setHidden(false); // the lock is turned off: open showing the amounts, like before
+  }, [loaded]); // only on the first load; turning it off later doesn't show the amounts by itself
+  const unlocking = useRef(false);
   const togglePrivacy = useCallback(async () => {
-    if (!state) return;
-    const r = await api.saveSettings({ privacy: state.settings.privacy === '1' ? '0' : '1' });
-    if (r.ok) setState(r.state);
-  }, [state]);
+    if (!hidden) return setHidden(true);
+    if (!lockOn) return setHidden(false);
+    if (unlocking.current) return;
+    unlocking.current = true;
+    try {
+      const r = await api.unlock();
+      if (r.ok) setHidden(false);
+      else if (!r.cancelled) say(r.error, false);
+    } finally {
+      unlocking.current = false;
+    }
+  }, [hidden, lockOn, say]);
+  useEffect(() => {
+    if (!lockOn) return;
+    let timer: number | undefined;
+    const lock = () => setHidden(true);
+    const onBlur = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(lock, 60_000);
+    };
+    const onFocus = () => clearTimeout(timer);
+    const onVisible = () => document.hidden && lock();
+    window.ledgerLock = lock;
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearTimeout(timer);
+      window.ledgerLock = undefined;
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [lockOn]);
 
   const edit = useCallback(async (id: number) => {
     const r = await api.txFields(id);
@@ -164,7 +206,6 @@ export default function App() {
     );
   }
 
-  const hidden = state.settings.privacy === '1';
   const q = state.quotes;
 
   return (
@@ -215,7 +256,7 @@ export default function App() {
                 {q.running ? '更新報價中…' : q.errors.length ? `報價更新失敗（${q.errors.length}）` : quoteLabel(q.latest, q.oldest)}
               </button>
               <span className="rail-tools">
-                <button type="button" className="quiet" onClick={togglePrivacy} aria-pressed={hidden} title="⌘⇧H">
+                <button type="button" className="quiet" onClick={togglePrivacy} aria-pressed={hidden} title={hidden && lockOn ? '⌘⇧H，需要 Touch ID 或密碼' : '⌘⇧H'}>
                   {hidden ? '顯示金額' : '隱藏金額'}
                 </button>
                 <button type="button" className="quiet rail-acct-btn" onClick={() => setPanel('accounts')}>
@@ -299,25 +340,38 @@ export default function App() {
             state={state}
             open={composer}
             onClose={closeComposer}
-            onSaved={(s, message) => {
+            onSaved={(s, message, follow) => {
               const before = new Set(state.transactions.map(t => t.id));
               const ids = s.transactions.filter(t => !before.has(t.id)).map(t => t.id);
               if (composer.editId != null) ids.push(composer.editId);
               setFresh(new Set(ids));
               setState(s);
               closeComposer();
-              say(message);
+              say(message, true, follow && { label: follow.label, run: () => setComposer(follow.open) });
             }}
           />
         )}
         {panel === 'accounts' && <AccountsPanel state={state} onState={setState} onClose={() => setPanel(null)} />}
         {panel === 'settings' && <SettingsPanel state={state} onState={setState} onClose={() => setPanel(null)} />}
         {panel === 'search' && <SearchPanel state={state} onEdit={editFromSearch} onClose={() => setPanel(null)} />}
+        {panel === 'categories' && <CategoriesPanel state={state} onState={setState} onClose={() => setPanel(null)} />}
         {panel === 'recurring' && <RecurringPanel state={state} onState={setState} onToast={say} onClose={() => setPanel(null)} />}
         {toast && (
-          <div key={toast.n} className={`toast ${toast.ok ? 'ok' : ''}`} role="status">
+          <div key={toast.n} className={`toast ${toast.ok ? 'ok' : ''} ${toast.action ? 'has-action' : ''}`} role="status">
             {toast.ok && <Icon name="check" size={16} />}
             {toast.text}
+            {toast.action && (
+              <button
+                type="button"
+                className="toast-action"
+                onClick={() => {
+                  toast.action?.run();
+                  setToast(null);
+                }}
+              >
+                {toast.action.label}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -342,7 +396,7 @@ function FirstSteps({ onAdd }: { onAdd(): void }) {
       </header>
       <ol>
         <li>在「其他 → 存入現金」記下每個帳戶現在有多少錢（勾選「期初」，之後補登以前的收支不會重複計算）</li>
-        <li>在「買進」勾選「補登過去買的股票」補上手上的持股，日期選當初買進那天（不會再扣現金）</li>
+        <li>用「買進 → 補登」補上手上的持股，日期選當初買進那天（不會再扣現金）</li>
         <li>之後每筆花費、收入、交易都按右上角「＋ 記一筆」</li>
       </ol>
     </section>

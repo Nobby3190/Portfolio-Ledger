@@ -16,17 +16,19 @@ from .db import APP_DIR, open_app_db
 from .poller import Poller
 from .services import recurring
 from .services.ledger import Ledger
+from .unlock import watch_lock
 
 UI = Path(__file__).parent / "ui"  # built by `npm --prefix frontend run build`
 log = logging.getLogger(__name__)
 
 
 class Notifier:
-    """Tells the page to reload its state, on its own thread: evaluate_js blocks until WKWebView
-    answers, which can take a long time while the view is suspended, and the poller must not wait."""
+    """Runs a bit of JS in the page (by default: reload its state), on its own thread: evaluate_js blocks
+    until WKWebView answers, which can take a long time while the view is suspended, and the poller must not wait."""
 
-    def __init__(self, windows: list[webview.Window]) -> None:
+    def __init__(self, windows: list[webview.Window], js: str = "window.ledgerChanged && window.ledgerChanged()") -> None:
         self.windows = windows
+        self.js = js
         self._pending = threading.Event()
         threading.Thread(target=self._run, name="notifier", daemon=True).start()
 
@@ -39,7 +41,7 @@ class Notifier:
             self._pending.clear()
             for w in self.windows:
                 try:
-                    w.evaluate_js("window.ledgerChanged && window.ledgerChanged()")
+                    w.evaluate_js(self.js)
                 except Exception:
                     log.exception("notify page failed")
 
@@ -77,5 +79,9 @@ def main() -> None:
             min_size=(720, 560),
         )
     )
+    # Screen locked or Mac asleep: hide the amounts again (隱藏金額). Through a Notifier, since the
+    # notification arrives on the Cocoa thread that evaluate_js waits on.
+    watch_lock(Notifier(windows, "window.ledgerLock && window.ledgerLock()"))
+
     # The build is ES modules, which WKWebView won't load from file:// — serve it over local HTTP.
     webview.start(poller.start, debug=os.environ.get("LEDGER_DEBUG") == "1", http_server=True)

@@ -10,7 +10,8 @@ from portfolio_ledger import repo
 from portfolio_ledger.db import Db
 from portfolio_ledger.models import Recurring
 from portfolio_ledger.services import finance, planner, recurring
-from portfolio_ledger.services.ledger import EntryError, Ledger
+from portfolio_ledger.api import Api
+from portfolio_ledger.services.ledger import DCA_CONFIRMED, EntryError, Ledger
 from portfolio_ledger.services.quick import parse
 
 TODAY = date(2026, 10, 11)
@@ -339,6 +340,56 @@ def test_recurring_dca_waits_for_the_close(broker, clock):
     tx = next(t for t in repo.list_txs(broker.db) if t.recurring_id)
     assert (tx.date, tx.price, tx.qty) == ("2026-10-12", D(117), D(85))
     assert recurring.run_due(broker) == 0 and recurring.rows(broker)[0]["next_date"] == "2026-11-10"
+
+
+def test_dca_rule_cannot_repeat_what_a_backfill_already_holds(broker):
+    broker.commit("補 0050 1000 100 @國泰 2026-10-06")
+    with pytest.raises(EntryError, match="0050 在 2026-10-06 有補登持股"):
+        recurring.save(broker, {"line": "定額 0050 10000 @國泰", "start_date": "2026-10-06"})
+    assert recurring.rows(broker) == []
+    # From the next deduction on is fine.
+    assert recurring.save(broker, {"line": "定額 0050 10000 @國泰", "start_date": "2026-10-09"}) == 1
+
+
+def test_composer_dca_with_repeat_makes_a_rule(broker, clock):
+    api = Api(broker, lambda: None)
+    r = api.commit("定額 0050 10000 @國泰 2026-10-06", None, "monthly")
+    assert r["ok"] and r["posted"] == 1
+    rule = recurring.rows(broker)[0]
+    assert rule["kind"] == "dca" and rule["start_date"] == "2026-10-06" and rule["next_date"] == "2026-11-06"
+    # Before that day's close: the rule is saved and posts once the close is out.
+    clock.d = date(2026, 10, 13)
+    r = api.commit("定額 0050 5000 @國泰 2026-10-13", None, "monthly")
+    assert r["ok"] and r["posted"] == 0 and len(recurring.rows(broker)) == 2
+    clock.d = date(2026, 10, 14)
+    repo.put_prices(broker.db, [("0050", "2026-10-13", D(118))])
+    assert recurring.run_due(broker) == 1
+
+
+def test_one_off_dca_before_the_close_says_so(broker, clock):
+    clock.d = date(2026, 10, 13)
+    r = Api(broker, lambda: None).commit("定額 0050 10000 2026-10-13")
+    assert not r["ok"] and "2026-10-13 的收盤價還沒出來" in r["error"] and "每月重複" in r["error"]
+
+
+def test_holding_shows_its_dca(broker):
+    recurring.save(broker, {"line": "定額 0050 10000 @國泰", "start_date": "2026-10-06"})
+    st = broker.state()
+    dca = st["holdings"][0]["dca"]
+    assert (dca["count"], dca["first_date"], dca["invested"], dca["avg_price"]) == (1, "2026-10-06", "9,910", "115.20")
+    assert dca["rules"][0]["amount"] == "10,000" and dca["rules"][0]["next_date"] == "2026-11-06"
+    assert next(t for t in st["transactions"] if t["kind"] == "buy")["dca"]
+    broker.commit("買 0050 100 116 @國泰 2026-10-09")
+    assert broker.state()["holdings"][0]["dca"]["count"] == 1  # a manual buy is not part of it
+
+
+def test_editing_a_dca_buy_to_the_fill_marks_it_confirmed(broker):
+    recurring.save(broker, {"line": "定額 0050 10000 @國泰", "start_date": "2026-10-06"})
+    tx = next(t for t in repo.list_txs(broker.db) if t.recurring_id)
+    broker.commit("買 0050 86 115.15 2026-10-06 @國泰 # 定期定額", tx.id)
+    edited = repo.get_tx(broker.db, tx.id)
+    assert edited.note == DCA_CONFIRMED and edited.recurring_id == tx.recurring_id
+    assert broker.state()["holdings"][0]["dca"]["count"] == 1
 
 
 def test_recurring_adopts_an_entry_recorded_by_hand(lg):

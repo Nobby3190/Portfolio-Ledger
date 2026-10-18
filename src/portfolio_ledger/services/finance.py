@@ -11,10 +11,10 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from .. import repo
-from ..models import GOAL_SCOPES, LIFE_PLAN_KINDS, Goal, LifePlan, Tx
+from ..models import GOAL_SCOPES, LIFE_PLAN_KINDS, Category, Goal, LifePlan, Tx
 from ..providers import yahoo
 from ..providers.base import ProviderError
-from . import advisor, dividends, fmt, planner
+from . import advisor, dividends, fmt, planner, quick
 
 if TYPE_CHECKING:
     from .ledger import Ledger
@@ -50,6 +50,23 @@ def _sum(flows: dict, month: str, kind: str) -> Decimal:
     return sum(flows.get(month, {}).get(kind, {}).values(), ZERO)
 
 
+def _tree(cats: list[Category], kind: str) -> list[tuple[Category, list[Category]]]:
+    """Top-level categories of a kind, each with its subcategories (子類別, one level)."""
+    tops = [c for c in cats if c.kind == kind and c.parent_id is None]
+    ids = {c.id for c in tops}
+    # A subcategory whose parent is gone (or is itself nested) is shown on its own.
+    tops += [c for c in cats if c.kind == kind and c.parent_id is not None and c.parent_id not in ids]
+    kids: dict[int | None, list[Category]] = {}
+    for c in cats:
+        if c.kind == kind and c.parent_id in ids:
+            kids.setdefault(c.parent_id, []).append(c)
+    return [(t, kids.get(t.id, [])) for t in tops]
+
+
+def _rollup(amounts: dict[int | None, Decimal], top: Category, kids: list[Category]) -> Decimal:
+    return amounts.get(top.id, ZERO) + sum((amounts.get(k.id, ZERO) for k in kids), ZERO)
+
+
 # ── 收支 ────────────────────────────────────────────────────────────────
 
 
@@ -72,39 +89,53 @@ def month_report(lg: Ledger, month: str | None = None) -> dict[str, Any]:
     cats = repo.list_categories(lg.db)
     spent = flows.get(month, {}).get("expense", {})
     last = flows.get(prev, {}).get("expense", {})
+
+    def row(c: Category, s: Decimal, l: Decimal, whole: Decimal) -> dict[str, Any]:
+        return {
+            "id": c.id,
+            "name": c.name,
+            "spent": fmt.money(s),
+            "budget": fmt.money(c.budget) if c.budget else None,
+            "budget_raw": f"{c.budget.normalize():f}" if c.budget else "",
+            "budget_ratio": float(s / c.budget) if c.budget else None,
+            "share": float(s / whole) if whole else 0.0,
+            "last": fmt.money(l) if l else None,
+            "delta": fmt.money(s - l, signed=True) if l or s else None,
+            "delta_sign": fmt.sign(s - l),
+            "raw": s,
+        }
+
     rows = []
-    for c in cats:
-        if c.kind != "expense":
+    for top, kids in _tree(cats, "expense"):
+        total = _rollup(spent, top, kids)
+        if top.archived and not total:
             continue
-        s, l = spent.get(c.id, ZERO), last.get(c.id, ZERO)
-        if c.archived and not s:
-            continue
-        rows.append(
-            {
-                "id": c.id,
-                "name": c.name,
-                "spent": fmt.money(s),
-                "budget": fmt.money(c.budget) if c.budget else None,
-                "budget_raw": f"{c.budget.normalize():f}" if c.budget else "",
-                "budget_ratio": float(s / c.budget) if c.budget else None,
-                "share": float(s / expense) if expense else 0.0,
-                "last": fmt.money(l) if l else None,
-                "delta": fmt.money(s - l, signed=True) if l or s else None,
-                "delta_sign": fmt.sign(s - l),
-                "raw": s,
-            }
-        )
+        r = row(top, total, _rollup(last, top, kids), expense)
+        if kids:
+            parts = [row(k, spent.get(k.id, ZERO), last.get(k.id, ZERO), total) for k in kids if spent.get(k.id) or not k.archived]
+            own = spent.get(top.id, ZERO)
+            if own:  # spent on 消費 itself, not on any of its subcategories
+                parts.append({**row(top, own, last.get(top.id, ZERO), total), "name": f"{top.name}（未細分）",
+                              "own": True, "budget": None, "budget_raw": "", "budget_ratio": None})  # fmt: skip
+            parts.sort(key=lambda x: (-x["raw"], x["name"]))
+            for x in parts:
+                x.pop("raw")
+            r["children"] = parts
+        rows.append(r)
     rows.sort(key=lambda r: (-r["raw"], r["name"]))
     for r in rows:
         r.pop("raw")
+    earned = flows.get(month, {}).get("income", {})
     income_rows = [
-        {"name": c.name, "amount": fmt.money(flows.get(month, {}).get("income", {}).get(c.id, ZERO))}
-        for c in cats
-        if c.kind == "income" and flows.get(month, {}).get("income", {}).get(c.id)
+        {"name": top.name, "amount": fmt.money(_rollup(earned, top, kids))}
+        for top, kids in _tree(cats, "income")
+        if _rollup(earned, top, kids)
     ]
 
     total_setting = repo.get_setting(lg.db, "budget_total", "")
-    budget = Decimal(total_setting) if total_setting else sum((c.budget for c in cats if c.budget), ZERO) or None
+    # Without a total, add up the top-level budgets: a 消費 budget already covers its subcategories.
+    tops = [t for t, _ in _tree(cats, "expense")]
+    budget = Decimal(total_setting) if total_setting else sum((c.budget for c in tops if c.budget), ZERO) or None
     days_left = None
     if future:
         pass  # nothing spent yet; the whole budget is left
@@ -192,30 +223,44 @@ def year_report(lg: Ledger, year: str | int | None = None) -> dict[str, Any]:
         return {"delta": fmt.money(now - before, signed=True), "pct": fmt.pct(now - before, before), "sign": fmt.sign(now - before)}
 
     spent, before = by_cat(y, "expense"), by_cat(y - 1, "expense", elapsed)
+    cats = repo.list_categories(lg.db)
+
+    def yrow(c: Category, x: Decimal, l: Decimal, whole: Decimal) -> dict[str, Any]:
+        budget = c.budget * 12 if c.budget else None
+        return {
+            "id": c.id, "name": c.name, "amount": fmt.money(x), "share": float(x / whole) if whole else 0.0,
+            "per_month": fmt.money(x / elapsed), "last": fmt.money(l) if l else None,
+            "delta": fmt.money(x - l, signed=True) if l else None, "delta_sign": fmt.sign(x - l),
+            "budget": fmt.money(budget) if budget else None, "budget_ratio": float(x / budget) if budget else None,
+            "raw": x,
+        }  # fmt: skip
+
     rows = []
-    for c in repo.list_categories(lg.db, "expense"):
-        x, l = spent.get(c.id, ZERO), before.get(c.id, ZERO)
+    for top, kids in _tree(cats, "expense"):
+        x, l = _rollup(spent, top, kids), _rollup(before, top, kids)
         if not x and not l:
             continue
-        budget = c.budget * 12 if c.budget else None
-        rows.append(
-            {
-                "id": c.id, "name": c.name, "amount": fmt.money(x), "share": float(x / expense) if expense else 0.0,
-                "per_month": fmt.money(x / elapsed), "last": fmt.money(l) if l else None,
-                "delta": fmt.money(x - l, signed=True) if l else None, "delta_sign": fmt.sign(x - l),
-                "budget": fmt.money(budget) if budget else None, "budget_ratio": float(x / budget) if budget else None,
-                "raw": x,
-            }
-        )  # fmt: skip
+        r = yrow(top, x, l, expense)
+        if kids:
+            parts = [yrow(k, spent.get(k.id, ZERO), before.get(k.id, ZERO), x) for k in kids]
+            if spent.get(top.id) or before.get(top.id):
+                parts.append({**yrow(top, spent.get(top.id, ZERO), before.get(top.id, ZERO), x),
+                              "name": f"{top.name}（未細分）", "own": True, "budget": None, "budget_ratio": None})  # fmt: skip
+            parts = [p for p in parts if p["raw"] or p["last"]]
+            parts.sort(key=lambda p: (-p["raw"], p["name"]))
+            for p in parts:
+                p.pop("raw")
+            r["children"] = parts
+        rows.append(r)
     rows.sort(key=lambda r: (-r["raw"], r["name"]))
     for r in rows:
         r.pop("raw")
     earned = by_cat(y, "income")
-    income_rows = [
-        {"name": c.name, "amount": fmt.money(earned[c.id]), "share": float(earned[c.id] / income) if income else 0.0}
-        for c in repo.list_categories(lg.db, "income")
-        if earned.get(c.id)
-    ]
+    income_rows = []
+    for top, kids in _tree(cats, "income"):
+        got = _rollup(earned, top, kids)
+        if got:
+            income_rows.append({"name": top.name, "amount": fmt.money(got), "share": float(got / income) if income else 0.0})
 
     trend = []
     for m in months(y):
@@ -266,6 +311,64 @@ def set_budget(lg: Ledger, category_id: int, amount: str) -> None:
     if repo.get_category(lg.db, category_id) is None:
         raise FinanceError("找不到這個分類")
     repo.set_category_budget(lg.db, category_id, _amount(amount, "預算"))
+
+
+def rename_category(lg: Ledger, category_id: int, name: str) -> None:
+    """Renames a category; recurring rules that file under it are rewritten to the new name."""
+    c = repo.get_category(lg.db, category_id)
+    if c is None:
+        raise FinanceError("找不到這個分類")
+    name = unicodedata.normalize("NFKC", name).strip()
+    if not name:
+        raise FinanceError("分類名稱不能空白")
+    # A category is one word of a quick command (支出 120 餐飲 @台新 # 午餐), so it must read back as one.
+    try:
+        ok = quick.parse(f"支出 1 {name}", lg.today()).category == name
+    except quick.ParseError:
+        ok = False
+    if not ok:
+        raise FinanceError("分類名稱要是一個詞：不能有空白、不能是數字或日期，也不能用 @ 或 # 開頭")
+    if name == c.name:
+        return
+    if any(x.name == name for x in repo.list_categories(lg.db, c.kind) if x.id != c.id):
+        raise FinanceError(f"已經有「{name}」這個分類")
+    rules = []
+    for r in repo.list_recurring(lg.db):
+        try:
+            cmd = quick.parse(r.line, lg.today())
+        except quick.ParseError:
+            continue
+        if cmd.action != c.kind or not cmd.category:
+            continue
+        cat, _ = lg._resolve_category(cmd.category, cmd.action)
+        if cat is None or cat.id != c.id:
+            continue
+        head, sep, note = r.line.partition("#")
+        words = head.split()
+        words[words.index(cmd.category)] = name
+        r.line = " ".join(words) + (f" #{note}" if sep else "")
+        rules.append(r)
+    repo.rename_category(lg.db, category_id, name, rules)
+
+
+def set_category_parent(lg: Ledger, category_id: int, parent_id: int | None) -> None:
+    """Files a category under another (子類別, one level only), or back at the top with None."""
+    c = repo.get_category(lg.db, category_id)
+    if c is None:
+        raise FinanceError("找不到這個分類")
+    if parent_id is not None:
+        p = repo.get_category(lg.db, parent_id)
+        if p is None:
+            raise FinanceError("找不到上層分類")
+        if p.id == c.id:
+            raise FinanceError("分類不能放在自己底下")
+        if p.kind != c.kind:
+            raise FinanceError("收入和支出分類不能互相放")
+        if p.parent_id is not None:
+            raise FinanceError(f"「{p.name}」已經是子類別，子類別底下不能再分")
+        if any(x.parent_id == c.id for x in repo.list_categories(lg.db, c.kind)):
+            raise FinanceError(f"「{c.name}」底下還有子類別，要先把它們移出來")
+    repo.set_category_parent(lg.db, category_id, parent_id)
 
 
 def set_total_budget(lg: Ledger, amount: str) -> None:

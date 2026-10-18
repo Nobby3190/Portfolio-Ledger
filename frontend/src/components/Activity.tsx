@@ -73,7 +73,8 @@ export function TxLine({ t, onEdit }: { t: TxRow; onEdit(id: number): void }) {
     else if (t.kind === 'split') sub.push(`1 股變 ${t.ratio} 股`);
     sub.push(t.account);
   }
-  if (t.note) sub.push(t.note);
+  // A 定期定額 buy still at the close price (its note changes once edited to the broker's fill).
+  if (t.note) sub.push(t.dca && t.note === '定期定額' ? '定期定額・收盤價估算' : t.note);
   const amount = t.kind === 'transfer' ? t.amount?.replace(/^−/, '') ?? null : t.amount;
   return (
     <button type="button" className={`trow ${fresh ? 'fresh' : ''}`} title="點一下修改" onClick={() => onEdit(t.id)}>
@@ -84,8 +85,8 @@ export function TxLine({ t, onEdit }: { t: TxRow; onEdit(id: number): void }) {
           <span className="ellipsis">
             {title}
             {t.recurring && (
-              <span className="rec-tag" title="週期性收支自動記入">
-                週期
+              <span className="rec-tag" title={t.dca ? '定期定額自動記入' : '週期性收支自動記入'}>
+                {t.dca ? '定額' : '週期'}
               </span>
             )}
           </span>

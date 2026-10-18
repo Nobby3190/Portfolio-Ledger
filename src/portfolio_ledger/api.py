@@ -5,13 +5,15 @@ from __future__ import annotations
 import logging
 import subprocess
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from . import unlock as auth
 from .services import finance, recurring, tracking
 from .services.finance import FinanceError
-from .services.ledger import EntryError, Ledger
+from .services.ledger import EntryError, Ledger, QuoteNotYet
+from .services.quick import ParseError, parse
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +28,13 @@ def _call(fn: Callable[[], dict[str, Any] | None]) -> dict[str, Any]:
         return {"ok": False, "error": f"發生錯誤：{e}"}
 
 
+def _is_dca(text: str, today: date) -> bool:
+    try:
+        return parse(text, today).action == "dca"
+    except ParseError:
+        return False
+
+
 class Api:
     # pywebview exposes public attributes too; keep collaborators private.
     def __init__(self, ledger: Ledger, refresh: Callable[[], None]) -> None:
@@ -35,12 +44,35 @@ class Api:
     def get_state(self) -> dict[str, Any]:
         return _call(lambda: {"state": self._ledger.state()})
 
+    def unlock(self) -> dict[str, Any]:
+        """隱藏金額: the system's Touch ID / password prompt; blocks until it closes."""
+        try:
+            auth.authenticate()
+        except auth.Cancelled:
+            return {"ok": False, "cancelled": True, "error": ""}
+        except auth.UnlockError as e:
+            return {"ok": False, "error": str(e)}
+        except Exception as e:
+            log.exception("unlock failed")
+            return {"ok": False, "error": f"發生錯誤：{e}"}
+        return {"ok": True}
+
     def preview(self, text: str, edit_id: int | None = None) -> dict[str, Any]:
         return _call(lambda: {"preview": self._ledger.preview(text, edit_id)})
 
     def commit(self, text: str, edit_id: int | None = None, repeat: str | None = None) -> dict[str, Any]:
         def run() -> dict[str, Any]:
-            tx_id = self._ledger.commit(text, edit_id)
+            dca = _is_dca(text, self._ledger.today())
+            if repeat and edit_id is None and dca:
+                # A rule rather than a commit: before the close there is no price yet, and the rule waits for it.
+                posted = recurring.start_dca(self._ledger, text, repeat)
+                return {"id": None, "posted": posted, "state": self._ledger.state()}
+            try:
+                tx_id = self._ledger.commit(text, edit_id)
+            except QuoteNotYet as e:
+                if not dca:
+                    raise
+                raise EntryError(f"{e.day} 的收盤價還沒出來：收盤後再記，或勾「每月重複」讓它收盤後自動記") from e
             if repeat and edit_id is None:  # 記一筆的「每月重複」
                 recurring.from_commit(self._ledger, text, tx_id, repeat)
             return {"id": tx_id, "state": self._ledger.state()}
@@ -113,6 +145,20 @@ class Api:
         def run() -> dict[str, Any]:
             finance.set_total_budget(self._ledger, amount)
             return {"month": finance.month_report(self._ledger, month)}
+
+        return _call(run)
+
+    def rename_category(self, category_id: int, name: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.rename_category(self._ledger, category_id, name)
+            return {"state": self._ledger.state()}
+
+        return _call(run)
+
+    def set_category_parent(self, category_id: int, parent_id: int | None) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.set_category_parent(self._ledger, category_id, parent_id)
+            return {"state": self._ledger.state()}
 
         return _call(run)
 
