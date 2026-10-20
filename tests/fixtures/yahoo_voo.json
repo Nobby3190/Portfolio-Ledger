@@ -1,3 +1,0 @@
-{"chart":{"result":[{"meta":{"currency":"USD","symbol":"VOO","instrumentType":"ETF","longName":"Vanguard S&P 500 ETF","gmtoffset":-14400,"regularMarketTime":1791576000,"regularMarketPrice":715.59},
-"timestamp":[1791307800,1791394200,1791480600,1791567000],
-"indicators":{"quote":[{"close":[705.1,null,710.87,715.5899963378906]}]}}],"error":null}}
