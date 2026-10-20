@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { Activity } from './components/Activity';
 import { AdviceButton } from './components/Advice';
-import { AlertsCard } from './components/Alerts';
+import { AlertsButton } from './components/Alerts';
 import { RecurringPanel, SearchPanel } from './components/Bookkeeping';
 import { Composer, type ComposerOpen } from './components/Composer';
 import { DepositsFx } from './components/DepositsFx';
@@ -276,7 +276,12 @@ export default function App() {
           <div className="main">
           <header className="view-head">
             <h1>{VIEWS.find(([v]) => v === view)![1]}</h1>
-            {view === 'assets' && <AdviceButton state={state} />}
+            {view === 'assets' && (
+              <span className="head-icons">
+                <AlertsButton state={state} onToast={text => say(text)} />
+                <AdviceButton state={state} />
+              </span>
+            )}
           </header>
         <FreshContext.Provider value={fresh}>
           <main className="page">
@@ -312,7 +317,6 @@ export default function App() {
                   onBuy={() => setComposer({ editId: null, kind: 'buy' })}
                 />
                 <div className="stack span-4">
-                  <AlertsCard state={state} onToast={text => say(text)} className="" />
                   <AllocationCard state={state} />
                 </div>
                 <DividendsCard state={state} />

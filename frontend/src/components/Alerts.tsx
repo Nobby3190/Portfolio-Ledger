@@ -1,14 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api';
+import { Icon } from '../lib/icons';
 import type { AlertItem, Alerts as AlertsData, State } from '../types';
 import { Segs } from './Advice';
+import { Sheet } from './Panels';
 
 const LEVEL_LABEL = { warn: '警示', note: '提醒', ok: '資訊' } as const;
 
 /** 提醒: price moves, the user's price band, review dates and coming 除息 for holdings and the watchlist.
- *  Shown at the top of 資產 only when there is something; a toast says when a refresh brought new ones. */
-export function AlertsCard({ state, onToast, className = 'span-12' }: { state: State; onToast(text: string): void; className?: string }) {
+ *  A blinking bell beside 健檢 in the top bar (資產 only) while any is left; it goes once every one is
+ *  dismissed (2026-10-20, was a card beside 持股). A toast says when a refresh brought new ones. */
+export function AlertsButton({ state, onToast }: { state: State; onToast(text: string): void }) {
   const [data, setData] = useState<AlertsData | null>(null);
+  const [open, setOpen] = useState(false);
   const known = useRef<Set<string> | null>(null);
   const refreshedAt = useRef(state.quotes.refreshed_at);
 
@@ -31,15 +36,40 @@ export function AlertsCard({ state, onToast, className = 'span-12' }: { state: S
     };
   }, [state]);
 
-  if (!data || data.items.length === 0) return null;
-  const take = (r: { ok: true; alerts: AlertsData } | { ok: false; error: string }) => r.ok && setData(r.alerts);
+  if (!data || (data.items.length === 0 && !open)) return null;
+  const take = (r: AlertsRes) => r.ok && setData(r.alerts);
+  const n = data.items.length;
+  const warn = data.items.some(a => a.level === 'warn');
+  const label = `提醒，${n} 則`;
 
   return (
-    <section className={`card advice alerts ${className}`} aria-labelledby="alerts-h">
-      <header className="card-head">
-        <h2 id="alerts-h">提醒</h2>
-        <span className="aside">{data.items.length} 則</span>
-      </header>
+    <>
+      {n > 0 && (
+        <button type="button" className="icon-btn blink" title={label} aria-label={label} onClick={() => setOpen(true)}>
+          <Icon name="bell" size={20} />
+          <span className={`count-badge ${warn ? 'lv-warn' : 'lv-note'}`} aria-hidden>
+            {n}
+          </span>
+        </button>
+      )}
+      {/* The top bar's backdrop blur would make it the sheet's containing block: render at the page level. */}
+      {open &&
+        createPortal(
+          <Sheet title="提醒" onClose={() => setOpen(false)} wide>
+            <AlertsBody data={data} take={take} />
+          </Sheet>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+type AlertsRes = { ok: true; alerts: AlertsData } | { ok: false; error: string };
+
+function AlertsBody({ data, take }: { data: AlertsData; take(r: AlertsRes): void }) {
+  return (
+    <div className="advice advice-sheet alerts">
+      <p className="aside">{data.items.length > 0 ? `${data.items.length} 則` : '都看過了。'}</p>
       <ul className="advice-list">
         {data.items.map(a => (
           <AlertRow
@@ -56,7 +86,7 @@ export function AlertsCard({ state, onToast, className = 'span-12' }: { state: S
       <footer className="advice-foot">
         <span className="muted tiny">依收盤價和你自己寫的投資筆記，門檻在設定裡改</span>
       </footer>
-    </section>
+    </div>
   );
 }
 

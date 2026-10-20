@@ -238,3 +238,18 @@ def test_hong_kong_auto_fees_and_total_cost_backfill(hk_ledger):
     assert book_cost == D(82000)
     with pytest.raises(EntryError, match="只用在補登"):
         lg.commit("買 2330 1 1000 總 1000")
+
+
+def test_launch_backup_is_taken_before_migrations(tmp_path, monkeypatch):
+    import sqlite3
+
+    from portfolio_ledger import db as dbmod
+
+    with sqlite3.connect(tmp_path / "data.db") as c:
+        c.execute("CREATE TABLE marker (x)")  # an old database, user_version 0
+    monkeypatch.setattr(dbmod, "APP_DIR", tmp_path)
+    live = dbmod.open_app_db()
+    assert live.query("PRAGMA user_version")[0][0] > 0
+    (backup,) = (tmp_path / "backups").glob("data-*.db")
+    with sqlite3.connect(backup) as c:
+        assert c.execute("PRAGMA user_version").fetchone()[0] == 0

@@ -4,60 +4,63 @@
    the allocation card gets its own categorical palette (no red/green in it). */
 
 :root {
-  --page: #f1f3f5;
+  --page: #f3f4f8;
   --card: #ffffff;
-  --card-2: #eef1f4; /* hover, inputs, chips */
+  --card-2: #eef0f5; /* hover, inputs, chips */
   --ink: #1e2530;
   --ink-2: #3a4656;
   --muted: #566273; /* secondary text: ≥ 6:1 on --card */
   --faint: #8794a3; /* tertiary only: axis ticks, placeholders */
-  --rule: #e1e6eb;
+  --rule: #e2e5ec;
   --shade-1: #1e2530;
   --shade-2: #4a5868;
   --shade-3: #7f8b99;
   --shade-4: #a9b3be;
   --shade-5: #c8d0d8;
   --shade-6: #e1e6eb;
-  --brand: #4a6178; /* slate blue: chart lines, meters */
-  --brand-soft: #aebbc8;
-  --gold: #6f8aa3; /* accent (silver-blue; the name is from the old brass): title rules, small accents */
-  --gold-soft: #dde4ea;
+  --brand: #4b54d8; /* indigo: chart lines, meters (繽紛版 2026-10-19; was slate #4a6178) */
+  --brand-soft: #b9bdf2;
+  --gold: #7a5bd6; /* accent (silver-blue; the name is from the old brass): title rules, small accents */
+  --gold-soft: #e4ddf8;
   --red: #c0392b;
   --green: #1f7a4d;
   --warn: #b45309;
   /* allocation: investments deep, cash-like light */
-  --inv-1: #4a6178;
-  --inv-2: #6f8aa3;
-  --inv-3: #3b4d60;
-  --inv-4: #8696a8;
-  --inv-5: #5c6b7b;
-  --csh-1: #aebbc8;
-  --csh-2: #c9d3dc;
-  --csh-3: #9fb0c0;
-  --csh-4: #d7dee5;
-  --csh-5: #c4cbd2;
+  --inv-1: #4b54d8;
+  --inv-2: #7a5bd6;
+  --inv-3: #3a40a8;
+  --inv-4: #9a8ee6;
+  --inv-5: #6a63c9;
+  --csh-1: #5cbfb3;
+  --csh-2: #8fd3ca;
+  --csh-3: #3fa89c;
+  --csh-4: #bfe6e0;
+  --csh-5: #a6dcd4;
   /* 大膽版 (2026-10-16). hue-*: lines, bars and text on cards (≥ 4.5:1 on --card). tone-*: solid squares and
      tiles under white icons/text. s-*: the big tiles, the same in both themes. None is red, green or amber. */
-  --hue-indigo: #5b6bb5;
-  --hue-sky: #3f7cac;
-  --hue-teal: #2f7f8a;
-  --hue-plum: #85588f;
-  --hue-sand: #8a7350;
-  --tone-indigo: #5b6bb5;
-  --tone-sky: #3f7cac;
-  --tone-teal: #2f7f8a;
-  --tone-plum: #85588f;
-  --tone-sand: #8a7350;
-  --tone-expense: #4a6178;
-  --tone-income: #6f8aa3;
+  --hue-indigo: #4b54d8;
+  --hue-sky: #0a72b8;
+  --hue-teal: #0a7d72;
+  --hue-plum: #9a35b8;
+  --hue-sand: #97661c;
+  --tone-indigo: #4b54d8;
+  --tone-sky: #0a72b8;
+  --tone-teal: #0a7d72;
+  --tone-plum: #9a35b8;
+  --tone-sand: #97661c;
+  --tone-expense: #5560a8;
+  --tone-income: #0f7fa3;
   --tone-neutral: #8794a3;
   --s-slate: #2c3644;
-  --s-indigo: #4553a0;
-  --s-sky: #2f6690;
-  --s-teal: #25666f;
-  --s-plum: #6e4778;
-  --s-sand: #6f5b3a;
+  --s-indigo: #3f47c4;
+  --s-sky: #09649f;
+  --s-teal: #086b62;
+  --s-plum: #842ba0;
+  --s-sand: #7e5414;
   --on-solid: #ffffff;
+  /* how much of its colour a card header / a category tile takes (亮色: cards stay plain, see the end of the file) */
+  --card-wash: 0%;
+  --tile-wash: 12%;
   --shadow: 0 1px 2px rgb(30 37 48 / 0.04), 0 10px 28px -16px rgb(30 37 48 / 0.18);
   --num: 'Bricolage Grotesque Variable', -apple-system, 'PingFang TC', sans-serif;
   --text: -apple-system, 'PingFang TC', 'Noto Sans TC', sans-serif;
@@ -111,6 +114,13 @@
     --tone-income: #5a7189;
     --tone-neutral: #46525f;
     --s-slate: #222b36;
+    --s-indigo: #4553a0;
+    --s-sky: #2f6690;
+    --s-teal: #25666f;
+    --s-plum: #6e4778;
+    --s-sand: #6f5b3a;
+    --card-wash: 9%;
+    --tile-wash: 9%;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 30px -18px rgb(0 0 0 / 0.6);
     color-scheme: dark;
   }
@@ -2898,6 +2908,27 @@ button.trow:active {
   align-self: center;
 }
 
+/* 提醒 and 健檢 side by side in the top bar; the bell blinks until every 提醒 is dismissed (2026-10-20) */
+.head-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.icon-btn.blink {
+  animation: blink 1.6s ease-in-out infinite;
+}
+
+.icon-btn.blink:hover {
+  animation: none;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+
 .alert-red {
   display: block;
   margin-top: 2px;
@@ -3480,7 +3511,7 @@ body {
 .card[aria-labelledby='ycat-h'],
 .card[aria-labelledby='life-h'] {
   border-color: color-mix(in srgb, var(--a) 26%, var(--rule));
-  background: linear-gradient(180deg, color-mix(in srgb, var(--a) 9%, var(--card)) 0, var(--card) 96px);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--a) var(--card-wash), var(--card)) 0, var(--card) 96px);
 }
 
 /* ── solid category squares ── */
@@ -3788,7 +3819,7 @@ body {
   min-width: 0;
   padding: 14px;
   border-radius: 18px;
-  background: color-mix(in srgb, var(--t) 9%, var(--card));
+  background: color-mix(in srgb, var(--t) var(--tile-wash), var(--card));
   border: 1px solid color-mix(in srgb, var(--t) 22%, var(--rule));
 }
 .cat-tile.over {
@@ -4139,8 +4170,13 @@ body {
 .cat-tile-more {
   justify-self: start;
   font-size: 12px;
-  padding: 1px 4px;
-  margin-left: -4px;
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--t) 35%, var(--rule));
+  border-radius: 999px;
+  color: var(--ink-2);
+}
+.cat-kids .cat-tile-more {
+  margin-top: 6px;
 }
 .cat-kids {
   display: grid;
@@ -4236,4 +4272,53 @@ body {
 }
 .cat-admin .r {
   text-align: right;
+}
+
+/* ── 亮色：卡片中性，顏色只給資料 (2026-10-19) ──────────────────────
+   使用者覺得每張卡各一個顏色、三頁主卡三種顏色，看起來不統一。亮色模式下，介面外框（卡片的小方塊、
+   邊框、卡內的條、主卡、色磚、側欄、結論條）一律用主色靛藍；色票只留給資料：分類圖示與方塊、
+   持股代號、圖表、資產配置色帶、儲蓄目標環。暗色維持每卡一色。放在檔尾，蓋過前面同權重的規則。 */
+@media (prefers-color-scheme: light) {
+  .card[aria-labelledby] {
+    --a: var(--brand);
+    border-color: var(--rule);
+  }
+  .app .card.hero {
+    --card: #3a40b0;
+    border-color: transparent;
+    background:
+      radial-gradient(120% 90% at 100% 0%, rgb(160 140 255 / 0.35), transparent 55%),
+      linear-gradient(155deg, #4b54d8 0%, #3a3fb4 50%, #26277a 100%);
+    box-shadow: 0 18px 40px -20px rgb(60 64 200 / 0.6);
+    /* allocation bar on indigo: investments lavender, cash mint */
+    --inv-1: #d9d6ff;
+    --inv-2: #b9b2ff;
+    --inv-3: #ece9ff;
+    --inv-4: #9d95f0;
+    --inv-5: #c8c2ff;
+    --csh-1: #7fe0d2;
+    --csh-2: #5cc9bb;
+    --csh-3: #a6eee4;
+    --csh-4: #46b3a6;
+    --csh-5: #92e6da;
+  }
+  /* 色磚: one indigo family, white text ≥ 5.7:1 */
+  .tile-slate {
+    --bg: #2e3270;
+  }
+  .tile-indigo {
+    --bg: #3f47c4;
+  }
+  .tile-teal {
+    --bg: #5a55d0;
+  }
+  .rail-assets,
+  .rail-money,
+  .rail-plan {
+    --nb: var(--brand);
+  }
+  .cal small,
+  .card[aria-labelledby='fire-h'] .answer {
+    background: var(--brand);
+  }
 }

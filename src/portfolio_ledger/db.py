@@ -6,7 +6,7 @@ import os
 import sqlite3
 import threading
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -54,22 +54,29 @@ class Db:
             return self.conn.execute(sql, params).fetchall()
 
     def backup_to(self, dest: Path) -> None:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with self.lock, sqlite3.connect(dest) as out:
-            self.conn.backup(out)
+        with self.lock:
+            _copy(self.conn, dest)
+
+
+def _copy(conn: sqlite3.Connection, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(dest)) as out:  # `with connect()` alone only commits, never closes
+        conn.backup(out)
 
 
 def open_app_db() -> Db:
     APP_DIR.mkdir(parents=True, exist_ok=True)
-    db = Db(APP_DIR / "data.db")
-    auto_backup(db, APP_DIR / "backups")
-    return db
+    path = APP_DIR / "data.db"
+    if path.exists():
+        auto_backup(path, APP_DIR / "backups")  # before Db() migrates, so a bad migration can be undone
+    return Db(path)
 
 
-def auto_backup(db: Db, folder: Path) -> Path:
-    """Copy the database aside on every launch, keeping the newest KEEP_BACKUPS copies."""
+def auto_backup(src: Path, folder: Path) -> Path:
+    """Copy the database file aside on every launch, keeping the newest KEEP_BACKUPS copies."""
     dest = folder / f"data-{datetime.now():%Y%m%d-%H%M%S}.db"
-    db.backup_to(dest)
+    with closing(sqlite3.connect(src)) as conn:
+        _copy(conn, dest)
     for old in sorted(folder.glob("data-*.db"))[:-KEEP_BACKUPS]:
         old.unlink(missing_ok=True)
     return dest

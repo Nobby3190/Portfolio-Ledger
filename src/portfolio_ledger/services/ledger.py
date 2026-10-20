@@ -24,7 +24,7 @@ import httpx
 
 from .. import repo
 from ..db import Db
-from ..models import ACCOUNT_TYPES, RECURRING_FREQS, SPENDING_TYPES, TX_KINDS, Account, Category, Security, Tx
+from ..models import ACCOUNT_TYPES, RECURRING_FREQS, SPENDING_TYPES, TX_KINDS, Account, Category, Recurring, Security, Tx
 from ..providers import cathay, finmind, twse, yahoo
 from ..providers.base import ProviderError, make_client
 from . import dividends, fees, fmt, planner, recurring
@@ -164,6 +164,33 @@ class Ledger:
             raise EntryError("顏色要是 #rrggbb")
         return color
 
+    def _renamed_rules(self, renames: dict[int, str], group: tuple[str, str] | None = None) -> list[Recurring]:
+        """Recurring rules rewritten for accounts about to be renamed ({account id: new name}; group: (old, new)
+        multi-currency name). Resolved against the current names, so call it before saving the rename."""
+        out = []
+        for r in repo.list_recurring(self.db):
+            head, sep, note = r.line.partition("#")
+            words = head.split()
+            changed = False
+            for i, w in enumerate(words):
+                if not w.startswith("@"):
+                    continue
+                name = w[1:]
+                if group and name.lower() == group[0].lower():
+                    new = group[1]
+                else:
+                    try:
+                        acc = self._pick_account(Command("expense"), None, name)
+                    except EntryError:
+                        continue
+                    new = renames.get(acc.id or 0)
+                if new and new != name:
+                    words[i], changed = f"@{new}", True
+            if changed:
+                r.line = " ".join(words) + (f" #{note}" if sep else "")
+                out.append(r)
+        return out
+
     def save_group(self, data: dict[str, Any]) -> None:
         """Create or update a multi-currency account: one part per currency, named "{name}-{CUR}".
 
@@ -188,6 +215,7 @@ class Ledger:
         if name in taken or any(f"{name}-{c}" in taken for c in currencies):
             raise EntryError(f"已經有叫「{name}」的帳戶")
         by_cur = {a.currency: a for a in parts}
+        rules = self._renamed_rules({a.id or 0: f"{name}-{a.currency}" for a in parts}, (old, name) if old else None)
         for a in parts:  # rename / restore / retire existing parts
             a.name, a.group_name, a.type, a.color = f"{name}-{a.currency}", name, type_, color
             if a.currency in currencies:
@@ -202,6 +230,8 @@ class Ledger:
         for c in currencies:
             if c not in by_cur:
                 repo.save_account(self.db, Account(None, f"{name}-{c}", type_, c, group_name=name, color=color))
+        for r in rules:  # rules naming the old @帳戶 keep working
+            repo.save_recurring(self.db, r)
 
     def delete_group(self, name: str) -> None:
         parts = [a for a in repo.list_accounts(self.db, True) if a.group_name == name]
@@ -257,7 +287,11 @@ class Ledger:
                 raise EntryError("年期要大於 0")
             if acc.term_years and acc.grace_years and acc.grace_years >= acc.term_years:
                 raise EntryError("寬限期要比年期短")
-        return repo.save_account(self.db, acc)
+        rules = self._renamed_rules({acc.id: name}) if acc.id is not None else []
+        saved = repo.save_account(self.db, acc)
+        for r in rules:  # rules naming the old @帳戶 keep working
+            repo.save_recurring(self.db, r)
+        return saved
 
     def delete_account(self, account_id: int) -> None:
         if repo.account_tx_count(self.db, account_id):
@@ -1149,6 +1183,7 @@ class Ledger:
             h["flows"] += p.flows
             if p.qty == 0:
                 continue
+            h.setdefault("cost_currencies", set()).add(acc.currency)
             close = sec.last_close if sec else None
             if close is not None:
                 value = p.qty * close
@@ -1176,6 +1211,12 @@ class Ledger:
                 h["day_change_twd"] += p.qty * (close - sec.prev_close) * fx_now
             total_return += unrealized_twd
             basis += p.cost_twd
+        for h in holdings.values():
+            curs = h.pop("cost_currencies", set())
+            if len(curs) == 1:
+                h["cost_currency"] = curs.pop()
+            elif len(curs) > 1:  # the same stock in a TWD (台幣交割) and a foreign account: average cost in TWD
+                h["cost"], h["cost_currency"] = h["cost_twd"], "TWD"
 
         cash_twd: dict[str, Decimal] = {}  # allocation label (台幣現金, 定存, ...) -> TWD
         account_rows = []
@@ -1201,7 +1242,8 @@ class Ledger:
         for h in open_h:
             day_change += h["day_change_twd"]
         total = sum((h["value_twd"] for h in open_h), ZERO) + sum(cash_twd.values(), ZERO)
-        classes = {"股票": ZERO, "債券": ZERO, "現金": sum(cash_twd.values(), ZERO)}  # for rebalancing
+        # For rebalancing: debts (信用卡, 貸款) are not negative cash, or a mortgage would swamp the mix.
+        classes = {"股票": ZERO, "債券": ZERO, "現金": sum((x for x in cash_twd.values() if x > 0), ZERO)}
         for h in open_h:
             classes["債券" if h["kind"] == "bond_etf" else "股票"] += h["value_twd"]
         return {

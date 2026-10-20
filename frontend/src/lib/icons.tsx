@@ -87,6 +87,7 @@ const PATHS = {
       <path d="M9 3h6v3H9zM8.5 11h7M8.5 14.5h7M8.5 18h4" />
     </>
   ),
+  bell: <path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15l1.5-2zM10 21h4" />,
   dots: (
     <g fill="currentColor" stroke="none">
       <circle cx="6" cy="12" r="1.5" />

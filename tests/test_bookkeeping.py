@@ -439,3 +439,39 @@ def test_recurring_rows_monthly_figures(lg):
     bonus = next(r for r in by.values() if r["kind"] == "income")
     assert bonus["monthly"] == pytest.approx(10000) and bonus["category"] == "獎金"
     assert by["Netflix"]["monthly"] is None and by["Netflix"]["category"] == "其他"  # paused
+
+
+def test_rebalance_leaves_debts_out_of_cash(lg):
+    lg.commit("存 -1000000 期初 @房貸 2026-01-01")  # owed: a liability, not negative cash
+    cash = next(r for r in finance.plan(lg)["rebalance"] if r["label"] == "現金")
+    assert cash["value"] == "500,000" and cash["current"] == 1.0
+
+
+def test_renaming_an_account_rewrites_its_rules(lg, clock):
+    recurring.save(lg, {"line": "支出 15000 居住 @台新 # 房租", "start_date": "2026-10-11"})
+    lg.save_account({"id": 1, "name": "Richart", "type": "bank"})
+    assert [r.line for r in repo.list_recurring(lg.db)] == ["支出 15000 居住 @Richart # 房租"]
+    clock.d = date(2026, 11, 11)
+    assert recurring.run_due(lg) == 1
+
+
+def test_renaming_a_group_rewrites_its_rules(lg):
+    lg.save_group({"name": "永豐", "type": "bank", "currencies": ["TWD", "USD"]})
+    recurring.save(lg, {"line": "轉 1000 @台新 @永豐-TWD", "start_date": "2026-10-11"})
+    lg.save_group({"name": "大戶", "old_name": "永豐", "type": "bank", "currencies": ["TWD", "USD"]})
+    assert [r.line for r in repo.list_recurring(lg.db)] == ["轉 1000 @台新 @大戶-TWD"]
+
+
+def test_same_stock_in_twd_and_usd_accounts_averages_in_twd(lg):
+    from portfolio_ledger.models import Security
+
+    lg.save_account({"name": "複委託", "type": "broker_us", "currency": "USD"})
+    lg.save_account({"name": "永豐", "type": "broker_tw"})
+    repo.put_fx(lg.db, [("USD", "2026-01-01", D(30))])
+    repo.upsert_securities(lg.db, [Security("AAPL", "Apple", "US", "USD", "stock", D(200), D(199), "2026-10-10")])
+    lg.commit("存 10000 @複委託 2026-01-01")
+    lg.commit("存 100000 @永豐 2026-01-01")
+    lg.commit("買 AAPL 10 200 2026-02-01 @複委託")
+    lg.commit("買 AAPL 10 200 2026-02-01 @永豐 匯 30")
+    h = next(h for h in lg.state()["holdings"] if h["symbol"] == "AAPL")
+    assert (h["avg_cost"], h["cost_currency"]) == ("6,000.00", "TWD")  # 2,000 USD × 30 + 60,000 TWD over 20 shares

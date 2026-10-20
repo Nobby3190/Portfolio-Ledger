@@ -270,9 +270,9 @@ function MonthView({
                       <Money className="num" value={c.delta} />
                     </span>
                   )}
-                  {kids.length > 0 && (
-                    <button type="button" className="quiet cat-tile-more" aria-expanded={open} onClick={() => setOpenCat(open ? null : c.id)}>
-                      {open ? '收起' : `${kids.length} 個子類別`}
+                  {kids.length > 0 && !open && (
+                    <button type="button" className="quiet cat-tile-more" aria-expanded={false} onClick={() => setOpenCat(c.id)}>
+                      {`${kids.length} 個子類別 ▾`}
                     </button>
                   )}
                   {open && (
@@ -297,6 +297,10 @@ function MonthView({
                           </div>
                         );
                       })}
+                      {/* one 收起, at the end of the list: a long list would push a toggle above it off screen */}
+                      <button type="button" className="quiet cat-tile-more" aria-expanded onClick={() => setOpenCat(null)}>
+                        收起子類別 ▴
+                      </button>
                     </div>
                   )}
                 </div>
