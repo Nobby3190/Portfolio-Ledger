@@ -1,6 +1,6 @@
 [project]
 name = "portfolio-ledger"
-version = "2.1.0"
+version = "2.1.1"
 description = "把投資和記帳放在同一本帳裡的 Mac 桌面 app"
 readme = "README.md"
 authors = [

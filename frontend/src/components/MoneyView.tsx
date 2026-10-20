@@ -4,10 +4,21 @@ import { categoryIcon, categoryTone, IconBadge, toneOf, txIcon } from '../lib/ic
 import { Money, PrivacyContext, RollingMoney, Trend } from '../lib/privacy';
 import type { MonthReport, RecurringRule, State } from '../types';
 import { TxList } from './Activity';
-import { PairBars } from './Charts';
+import { Donut, PairBars } from './Charts';
 import { YearView } from './YearView';
 
 const FLOW_KINDS = ['income', 'expense', 'transfer', 'repay'];
+
+// 支出分類 shows either a pie of the 大類 or the budget tiles; the choice is remembered.
+type CatMode = 'pie' | 'budget';
+const CAT_MODE_KEY = 'ledger.money.catMode';
+const readCatMode = (): CatMode => {
+  try {
+    return localStorage.getItem(CAT_MODE_KEY) === 'budget' ? 'budget' : 'pie';
+  } catch {
+    return 'pie';
+  }
+};
 
 export function MoneyView({ state, onEdit, onPanel }: { state: State; onEdit(id: number): void; onPanel(p: 'search' | 'recurring' | 'categories'): void }) {
   const [mode, setMode] = useState<'month' | 'year'>('month');
@@ -66,6 +77,16 @@ function MonthView({
   const [report, setReport] = useState<MonthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openCat, setOpenCat] = useState<number | null>(null); // the tile showing its 子類別
+  const [catMode, setCatModeState] = useState(readCatMode);
+  const [pieHover, setPieHover] = useState<number | null>(null);
+  const setCatMode = (k: CatMode) => {
+    setCatModeState(k);
+    try {
+      localStorage.setItem(CAT_MODE_KEY, k);
+    } catch {
+      // private window: the choice just isn't remembered
+    }
+  };
 
   // Reload when the month changes or anything was recorded (state is replaced on every save).
   useEffect(() => {
@@ -89,6 +110,8 @@ function MonthView({
   // A month still to come lists every category, so budgets can be set ahead.
   const cats = m.is_future ? m.categories : m.categories.filter(c => c.spent !== '0' || c.budget);
   const unused = m.categories.filter(c => c.spent === '0' && !c.budget).map(c => c.name);
+  // The pie: 大類 with spending, biggest first; never for a month still to come.
+  const pie = catMode === 'pie' && !m.is_future ? m.categories.filter(c => c.share > 0).sort((a, b) => b.share - a.share) : null;
 
   async function saveTotal(v: string) {
     const r = await api.setTotalBudget(v, m.month);
@@ -236,11 +259,47 @@ function MonthView({
         <section className="card span-7" aria-labelledby="cat-h">
           <header className="card-head">
             <h2 id="cat-h">支出分類</h2>
-            <button type="button" className="quiet aside" onClick={() => onPanel('categories')}>
-              管理分類
-            </button>
+            <span className="cat-head-actions">
+              {!m.is_future && (
+                <span className="seg" role="radiogroup" aria-label="看分類占比或預算">
+                  {(['pie', 'budget'] as const).map(k => (
+                    <button key={k} type="button" role="radio" aria-checked={catMode === k} className={catMode === k ? 'on' : ''} onClick={() => setCatMode(k)}>
+                      {k === 'pie' ? '分類' : '預算'}
+                    </button>
+                  ))}
+                </span>
+              )}
+              <button type="button" className="quiet aside" onClick={() => onPanel('categories')}>
+                管理分類
+              </button>
+            </span>
           </header>
-          {/* one tile per category, in the category's colour (大膽版); amber still means near or over budget */}
+          {pie ? (
+            <div className="cat-pie">
+              <Donut
+                slices={pie.map(c => ({ key: c.id, label: c.name, value: c.share, amount: c.spent, color: categoryTone(c.name, 'expense') }))}
+                total={m.expense}
+                totalLabel={m.is_current ? '這個月花了' : `${m.label}花了`}
+                ariaLabel="各分類占本月支出"
+                hover={pieHover}
+                onHover={setPieHover}
+              />
+              <div className="table cat-pie-t" onPointerLeave={() => setPieHover(null)}>
+                {pie.map((c, i) => (
+                  <div key={c.id} className={`trow ${pieHover === i ? 'on' : ''}`} onPointerEnter={() => setPieHover(i)}>
+                    <span className="cell-ic">
+                      <i className="cat-dot" style={{ background: categoryTone(c.name, 'expense') }} aria-hidden />
+                      <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
+                      <span className="ellipsis">{c.name}</span>
+                    </span>
+                    <Money className="num r" value={c.spent} />
+                    <span className="num muted r">{Math.round(c.share * 100)}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+          /* one tile per category, in the category's colour (大膽版); amber still means near or over budget */
           <div className="cat-tiles">
             {cats.map(c => {
               const r = c.budget_ratio;
@@ -307,6 +366,7 @@ function MonthView({
               );
             })}
           </div>
+          )}
           {unused.length > 0 && (
             <p className="note">
               其他分類：{unused.join('、')}。輸入分類名稱的一部分就會對到（「餐」→ 餐飲），新名稱會自動建立分類。

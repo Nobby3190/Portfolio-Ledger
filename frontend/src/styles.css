@@ -4322,3 +4322,88 @@ body {
     background: var(--brand);
   }
 }
+
+/* 支出分類「分類」: a donut of the 大類 beside an aligned legend table */
+.cat-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cat-head-actions .seg {
+  width: 120px;
+}
+.cat-head-actions .seg button {
+  padding: 4px;
+  font-size: 13px;
+}
+.cat-pie {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
+  align-items: center;
+}
+@media (max-width: 760px) {
+  .cat-pie {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cat-pie .donut {
+    max-width: 200px;
+    margin: 0 auto;
+  }
+}
+.donut {
+  position: relative;
+}
+.donut svg {
+  display: block;
+  width: 100%;
+  transform: rotate(-90deg);
+}
+.donut-track {
+  fill: none;
+  stroke: var(--card-2);
+  stroke-width: 18;
+}
+.donut-arc {
+  fill: none;
+  stroke-width: 18;
+  cursor: default;
+  transition: opacity 0.15s;
+  animation: fade 0.45s ease-out both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+.donut-arc.dim {
+  opacity: 0.3;
+}
+.donut-mid {
+  position: absolute;
+  inset: 26%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-width: 0;
+}
+.donut-mid > * {
+  max-width: 100%;
+}
+.donut-mid strong {
+  font-size: 20px;
+  font-weight: 750;
+}
+.cat-pie-t {
+  --cols: minmax(0, 1fr) 100px 48px;
+}
+.cat-pie-t .trow {
+  padding: 7px 8px;
+}
+.cat-pie-t .trow.on {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+.cat-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}

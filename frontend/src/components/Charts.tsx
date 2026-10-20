@@ -280,3 +280,51 @@ export function PairBars({ data, names, ariaLabel, height = 180, onPick, selecte
     </figure>
   );
 }
+
+interface DonutProps {
+  slices: { key: string | number; label: string; value: number; amount: string; color: string }[]; // value: share, 0–1
+  total: string; // shown in the middle until a slice is hovered
+  totalLabel: string;
+  ariaLabel: string;
+  hover: number | null; // shared with the legend beside it
+  onHover(i: number | null): void;
+}
+
+/** One ring, a slice per category; the middle shows the total or the hovered slice. */
+export function Donut({ slices, total, totalLabel, ariaLabel, hover, onHover }: DonutProps) {
+  const hidden = useContext(PrivacyContext);
+  const gap = slices.length > 1 ? 0.6 : 0; // of 100, so neighbours in the same tone stay apart
+  let at = 0;
+  const h = hover == null ? null : slices[hover];
+  return (
+    <div className="donut">
+      <svg viewBox="0 0 120 120" role="img" aria-label={ariaLabel} onPointerLeave={() => onHover(null)}>
+        <circle cx="60" cy="60" r="48" className="donut-track" />
+        {slices.map((s, i) => {
+          const len = s.value * 100;
+          const start = at;
+          at += len;
+          return (
+            <circle
+              key={s.key}
+              cx="60"
+              cy="60"
+              r="48"
+              pathLength="100"
+              className={`donut-arc ${hover != null && hover !== i ? 'dim' : ''}`}
+              style={{ stroke: s.color, '--i': i } as React.CSSProperties}
+              strokeDasharray={`${Math.max(len - gap, 0.01)} ${100 - Math.max(len - gap, 0.01)}`}
+              strokeDashoffset={-start}
+              onPointerEnter={() => onHover(i)}
+            />
+          );
+        })}
+      </svg>
+      <div className="donut-mid" aria-hidden>
+        <span className="muted small ellipsis">{h ? h.label : totalLabel}</span>
+        <strong className="num">{hidden ? '••••' : h ? h.amount : total}</strong>
+        {h && <span className="num muted small">{Math.round(h.value * 100)}%</span>}
+      </div>
+    </div>
+  );
+}
