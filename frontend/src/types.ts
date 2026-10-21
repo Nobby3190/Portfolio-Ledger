@@ -158,7 +158,7 @@ export interface State {
     debts: { label: string; value: string }[];
     debt_total: string | null;
   };
-  history: { date: string; total: string }[];
+  history: { date: string; total: string; holdings: string | null }[]; // holdings: null where an old snapshot can't tell
   holdings: Holding[];
   holdings_value: string;
   holdings_unrealized: string;

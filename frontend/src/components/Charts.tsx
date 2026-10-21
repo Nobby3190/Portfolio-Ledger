@@ -15,7 +15,9 @@ export function compact(n: number): string {
 
 interface Series {
   name: string;
-  values: number[];
+  values: (number | null)[]; // null (or a short array) leaves a gap
+  dates?: string[]; // per-point label in the tooltip, when the series isn't on the x labels (a compared period)
+  color?: string; // its own hue (a CSS colour/var) instead of the brand ink; each coloured main series gets an area
   style: 'main' | 'quiet'; // main: solid ink, quiet: dashed lighter ink
 }
 
@@ -29,6 +31,56 @@ interface LineProps {
   fit?: boolean; // y axis spans the data instead of starting at 0
   area?: boolean; // soft fill under the first series
   marks?: { x: number; label: string }[]; // points on the first series; x in label positions (may be fractional)
+  smooth?: boolean; // monotone curves instead of straight segments
+  tipFormat?: (n: number) => string; // tooltip values, when they should differ from the axis
+  legend?: boolean; // false when the page already keys the series (the figures above the chart)
+}
+
+type Pt = [number, number];
+
+/** Runs of consecutive non-null points, so a missing value breaks the line instead of dropping to 0. */
+function runs(values: (number | null)[], n: number, x: (i: number) => number, y: (v: number) => number): Pt[][] {
+  const out: Pt[][] = [];
+  let cur: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = values[i];
+    if (v == null) {
+      if (cur.length) out.push(cur);
+      cur = [];
+    } else cur.push([x(i), y(v)]);
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+
+const f = (p: Pt) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`;
+
+/** A run as a path: straight, or a monotone cubic (Fritsch–Carlson), which never overshoots the data. */
+function runPath(p: Pt[], smooth: boolean): string {
+  const n = p.length;
+  if (!smooth || n < 3) return `M${p.map(f).join('L')}`;
+  const d = p.slice(1).map((q, i) => (q[1] - p[i][1]) / (q[0] - p[i][0]));
+  const m = p.map((_, i) => (i === 0 ? d[0] : i === n - 1 ? d[n - 2] : d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2));
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) {
+      m[i] = m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / d[i];
+    const b = m[i + 1] / d[i];
+    const s = a * a + b * b;
+    if (s > 9) {
+      const t = 3 / Math.sqrt(s);
+      m[i] = t * a * d[i];
+      m[i + 1] = t * b * d[i];
+    }
+  }
+  let out = `M${f(p[0])}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = (p[i + 1][0] - p[i][0]) / 3;
+    out += `C${f([p[i][0] + h, p[i][1] + m[i] * h])} ${f([p[i + 1][0] - h, p[i + 1][1] - m[i + 1] * h])} ${f(p[i + 1])}`;
+  }
+  return out;
 }
 
 /** The element's pixel width, so the SVG viewBox matches it and text never scales. */
@@ -57,7 +109,20 @@ function niceTicks(max: number, count = 3): number[] {
   return ticks;
 }
 
-export function LineChart({ labels, series, target, height = 220, ariaLabel, format = compact, fit = false, area = false, marks = [] }: LineProps) {
+export function LineChart({
+  labels,
+  series,
+  target,
+  height = 220,
+  ariaLabel,
+  format = compact,
+  fit = false,
+  area = false,
+  marks = [],
+  smooth = false,
+  tipFormat = format,
+  legend = true,
+}: LineProps) {
   const fillId = `fill${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const hidden = useContext(PrivacyContext);
   const [hover, setHover] = useState<number | null>(null);
@@ -65,7 +130,8 @@ export function LineChart({ labels, series, target, height = 220, ariaLabel, for
   const [box, W] = useWidth();
   const n = labels.length;
   if (n < 2) return null;
-  const all = series.flatMap(s => s.values).concat(target ? [target.value] : []);
+  const all = series.flatMap(s => s.values.filter((v): v is number => v != null)).concat(target ? [target.value] : []);
+  if (all.length === 0) return null;
   let yMin = 0;
   let ticks = niceTicks(Math.max(...all) * 1.05);
   if (fit) {
@@ -90,12 +156,12 @@ export function LineChart({ labels, series, target, height = 220, ariaLabel, for
   const hx = hover != null ? x(hover) : 0;
   return (
     <figure className="chart">
-      {series.length > 1 && (
+      {legend && series.length > 1 && (
         <figcaption className="chart-legend">
           {series.map(s => (
             <span key={s.name}>
               <svg width="22" height="8" aria-hidden>
-                <line x1="0" y1="4" x2="22" y2="4" className={`ln ${s.style}`} />
+                <line x1="0" y1="4" x2="22" y2="4" className={`ln ${s.style}`} style={s.color ? { stroke: s.color } : undefined} />
               </svg>
               {s.name}
             </span>
@@ -135,29 +201,37 @@ export function LineChart({ labels, series, target, height = 220, ariaLabel, for
               </text>
             </g>
           )}
-          {area && (
-            <>
-              <defs>
-                <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" className="area-top" />
-                  <stop offset="1" className="area-bottom" />
-                </linearGradient>
-              </defs>
-              <polygon
-                className="area-fill"
-                points={`${x(0)},${PAD.top + ih} ${series[0].values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')} ${x(n - 1)},${PAD.top + ih}`}
-                fill={`url(#${fillId})`}
-              />
-            </>
-          )}
+          {area &&
+            series.map((s, k) =>
+              s.style === 'main' && (k === 0 || s.color) ? (
+                <g key={s.name}>
+                  <defs>
+                    <linearGradient id={`${fillId}${k}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" className="area-top" style={s.color ? { stopColor: s.color } : undefined} />
+                      <stop offset="1" className="area-bottom" style={s.color ? { stopColor: s.color } : undefined} />
+                    </linearGradient>
+                  </defs>
+                  <path
+                    className="area-fill"
+                    d={runs(s.values, n, x, y)
+                      .map(r => `${runPath(r, smooth)}L${r[r.length - 1][0].toFixed(1)},${PAD.top + ih}L${r[0][0].toFixed(1)},${PAD.top + ih}Z`)
+                      .join('')}
+                    fill={`url(#${fillId}${k})`}
+                  />
+                </g>
+              ) : null,
+            )}
           {series.map(s => (
             // The main line gets pathLength 1 so it can draw itself in with one dash offset;
             // the dashed quiet line keeps real lengths for its dash pattern.
             <path
               key={s.name}
-              d={`M${s.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('L')}`}
+              d={runs(s.values, n, x, y)
+                .map(r => runPath(r, smooth))
+                .join('')}
               pathLength={s.style === 'main' ? 1 : undefined}
               className={`ln ${s.style} ${s.style === 'main' ? 'draw' : ''}`}
+              style={s.color ? { stroke: s.color } : undefined}
             />
           ))}
           {marks
@@ -166,7 +240,10 @@ export function LineChart({ labels, series, target, height = 220, ariaLabel, for
               const vs = series[0].values;
               const i0 = Math.floor(mk.x);
               const i1 = Math.min(n - 1, i0 + 1);
-              const v = vs[i0] + (vs[i1] - vs[i0]) * (mk.x - i0);
+              const a = vs[i0];
+              const b = vs[i1];
+              if (a == null || b == null) return null;
+              const v = a + (b - a) * (mk.x - i0);
               return (
                 <g key={mk.label + mk.x}>
                   <circle cx={x(mk.x)} cy={y(v)} r="4.5" className="mark" />
@@ -179,20 +256,27 @@ export function LineChart({ labels, series, target, height = 220, ariaLabel, for
           {hover != null && (
             <g>
               <line x1={hx} x2={hx} y1={PAD.top} y2={PAD.top + ih} className="cross" />
-              {series.map(s => (
-                <circle key={s.name} cx={hx} cy={y(s.values[hover])} r="4" className={`dot ${s.style}`} />
-              ))}
+              {series.map(s => {
+                const v = s.values[hover];
+                return v == null ? null : <circle key={s.name} cx={hx} cy={y(v)} r="4" className={`dot ${s.style}`} style={s.color ? { fill: s.color } : undefined} />;
+              })}
             </g>
           )}
         </svg>
         {hover != null && (
           <div className="tip" style={{ left: `${(hx / W) * 100}%` }}>
             <strong>{labels[hover]}</strong>
-            {series.map(s => (
-              <span key={s.name}>
-                {s.name} <b className="num">{hidden ? '••••' : format(s.values[hover])}</b>
-              </span>
-            ))}
+            {/* main series first, whatever order they're drawn in */}
+            {[...series].sort((a, b) => Number(a.style !== 'main') - Number(b.style !== 'main')).map(s => {
+              const v = s.values[hover];
+              if (v == null) return null;
+              return (
+                <span key={s.name} className={s.dates || s.color ? 'tip-row' : undefined}>
+                  {(s.dates || s.color) && <i className={`sw ${s.style}`} style={s.color ? { background: s.color } : undefined} aria-hidden />}
+                  {s.dates ? s.dates[hover] : s.name} <b className="num">{hidden ? '••••' : tipFormat(v)}</b>
+                </span>
+              );
+            })}
           </div>
         )}
       </div>

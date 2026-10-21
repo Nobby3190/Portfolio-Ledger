@@ -3,19 +3,150 @@ import { Money, RollingMoney, signClass, Trend } from '../lib/privacy';
 import type { State } from '../types';
 import { LineChart } from './Charts';
 
+type Range = '1m' | '3m' | 'ytd' | 'all';
+const RANGES: { key: Range; label: string }[] = [
+  { key: '1m', label: '1 個月' },
+  { key: '3m', label: '3 個月' },
+  { key: 'ytd', label: '今年' },
+  { key: 'all', label: '全部' },
+];
+const VIEW_KEY = 'ledger.assets.chart';
+
+// The range and the 對照前期 switch are remembered.
+const readView = (): { range: Range; compare: boolean } => {
+  try {
+    const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}');
+    return { range: RANGES.some(r => r.key === v.range) ? v.range : '3m', compare: v.compare === true };
+  } catch {
+    return { range: '3m', compare: false };
+  }
+};
+
+const WEEK = '日一二三四五六';
+/** '2026-10-18' shifted back by whole months (day clamped to the month's end), as ISO. */
+const monthsBack = (iso: string, k: number) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1 - k, 1));
+  const end = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+  t.setUTCDate(Math.min(d, end));
+  return t.toISOString().slice(0, 10);
+};
+const dayLabel = (iso: string) => `${md(iso)} (${WEEK[new Date(`${iso}T00:00:00Z`).getUTCDay()]})`;
+const exact = (n: number) => Math.round(n).toLocaleString('en-US');
+
+type Point = State['history'][number];
+type Line = { key: 'total' | 'holdings'; label: string; value: string; of: (p: Point) => number | null };
+
+/** 總資產 and 持股市值 as one dashboard, like a revenue dashboard: range, the two figures as tabs, the chart of
+ *  the chosen one (optionally against the period before), then the allocation ribbon (2026-10-21).
+ *  It sits on the page itself, not in a card. */
 export function NetWorthCard({ state, className = '' }: { state: State; className?: string }) {
   const invested = state.holdings.length > 0 || state.closed.length > 0;
   const h = state.history;
+  const [view, setViewState] = useState(readView);
+  const [picked, setPicked] = useState<Line['key']>('total');
+  const setView = (v: Partial<typeof view>) => {
+    const next = { ...view, ...v };
+    setViewState(next);
+    try {
+      localStorage.setItem(VIEW_KEY, JSON.stringify(next));
+    } catch {
+      // private window: the choice just isn't remembered
+    }
+  };
+  const lines: Line[] = [
+    { key: 'total', label: '總資產', value: state.total, of: p => Number(p.total) },
+    ...(state.holdings.length > 0
+      ? [{ key: 'holdings' as const, label: '持股市值', value: state.holdings_value, of: (p: Point) => (p.holdings == null ? null : Number(p.holdings)) }]
+      : []),
+  ];
+  const line = lines.find(l => l.key === picked) ?? lines[0];
+
+  // The period: its first day, and how a day maps to the same day of the period before.
+  const today = state.today;
+  const { range, compare } = view;
+  const shift = (d: string) => (range === '1m' ? monthsBack(d, 1) : range === '3m' ? monthsBack(d, 3) : monthsBack(d, 12));
+  const start = range === 'all' ? (h[0]?.date ?? today) : range === 'ytd' ? `${today.slice(0, 4)}-01-01` : shift(today);
+  let cur = h.filter(p => p.date >= start);
+  if (cur.length < 2) cur = h.slice(-2);
+  // 對照: for each day, the last snapshot on or before the same day of the period before (within that period).
+  const prevStart = shift(start);
+  const prev = cur.map(p => {
+    const want = shift(p.date);
+    let hit: Point | undefined;
+    for (const q of h) {
+      if (q.date > want) break;
+      if (q.date >= prevStart) hit = q;
+    }
+    return hit;
+  });
+  const canCompare = range !== 'all' && prev.some(q => q != null && line.of(q) != null);
+  const showCompare = compare && canCompare;
+  const rangeLabel = `${RANGES.find(r => r.key === range)!.label}${range === 'all' || range === 'ytd' ? '' : '內'}`;
+
   return (
-    <section className={`card hero ${className}`} aria-label="總資產">
-      <p className="label">總資產</p>
-      <h1 className="hero-num">
-        <span className="ccy">NT$</span>
-        <RollingMoney id="total" value={state.total} />
-      </h1>
-      {/* The investment figures (day change, total return) live on the 持股 card, once (2026-10-13);
-          this card shows how net worth itself moved. */}
-      <NetWorthChanges state={state} />
+    <section className={`board ${className}`} aria-label="總資產">
+      {h.length >= 2 && (
+        <div className="hero-tools">
+          <div className="seg" role="radiogroup" aria-label="區間">
+            {RANGES.map(r => (
+              <button key={r.key} type="button" role="radio" aria-checked={range === r.key} className={range === r.key ? 'on' : ''} onClick={() => setView({ range: r.key })}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+          {canCompare && (
+            <label className="hero-compare">
+              <input type="checkbox" checked={compare} onChange={e => setView({ compare: e.target.checked })} />
+              對照前期
+            </label>
+          )}
+        </div>
+      )}
+
+      <div className={`hero-tabs ${lines.length > 1 ? 'pair' : ''}`} role={lines.length > 1 ? 'tablist' : undefined} aria-label="指標">
+        {lines.map(l => {
+          const first = cur.map(l.of).find(v => v != null);
+          const delta = h.length >= 2 && first != null ? amount(l.value) - first : null;
+          const on = l.key === line.key;
+          const body = (
+            <>
+              <span className="label">{l.label}</span>
+              <span className="hero-num">
+                <span className="ccy">NT$</span>
+                <RollingMoney id={l.key} value={l.value} />
+              </span>
+              {delta != null && (
+                <span className={`hero-delta ${signClass(Math.sign(delta))}`}>
+                  <span className="muted">{rangeLabel}</span>
+                  <Money className="num" value={signed(delta)} />
+                  {first! > 0 && (
+                    <span className="num pct trend">
+                      <Trend sign={Math.sign(delta)} />
+                      {`${delta >= 0 ? '+' : '−'}${Math.abs((delta / first!) * 100).toFixed(2)}%`}
+                    </span>
+                  )}
+                </span>
+              )}
+            </>
+          );
+          return lines.length > 1 ? (
+            <button key={l.key} type="button" role="tab" aria-selected={on} className={`hero-tab ${on ? 'on' : ''}`} onClick={() => setPicked(l.key)}>
+              {body}
+            </button>
+          ) : (
+            <div key={l.key} className="hero-tab on">
+              {body}
+            </div>
+          );
+        })}
+      </div>
+
+      {h.length >= 2 && (
+        <dl className="metrics">
+          {line.key === 'total' ? <NetWorthChanges state={state} /> : <HoldingsChanges state={state} />}
+        </dl>
+      )}
       {!invested && h.length < 2 && state.allocation_groups.groups.length > 0 && (
         <dl className="metrics">
           {state.allocation_groups.groups.map(g => (
@@ -40,17 +171,58 @@ export function NetWorthCard({ state, className = '' }: { state: State; classNam
       {h.length >= 2 && (
         <div className="hero-chart">
           <LineChart
-            ariaLabel="淨值走勢"
-            height={200}
-            labels={h.map(p => p.date.slice(5).replace('-', '/'))}
-            series={[{ name: '淨值', values: h.map(p => Number(p.total)), style: 'main' }]}
+            ariaLabel={`${line.label}走勢`}
+            height={260}
+            labels={cur.map(p => dayLabel(p.date))}
+            series={[
+              // the earlier period first, so the current line draws over it
+              ...(showCompare
+                ? [{ name: '前期', values: prev.map(q => (q ? line.of(q) : null)), style: 'quiet' as const, color: 'var(--c-prev)', dates: prev.map(q => (q ? dayLabel(q.date) : '')) }]
+                : []),
+              { name: '本期', values: cur.map(line.of), style: 'main' as const, color: 'var(--c-line)', dates: showCompare ? cur.map(p => dayLabel(p.date)) : undefined },
+            ]}
+            tipFormat={exact}
             fit
             area
+            smooth
+            legend={false}
           />
         </div>
       )}
       <AllocRibbon state={state} />
     </section>
+  );
+}
+
+/** The 持股 figures that used to sit on their own tile: the last trading day and unrealized. */
+function HoldingsChanges({ state }: { state: State }) {
+  return (
+    <>
+      <div>
+        <dt>最近交易日</dt>
+        <dd className={signClass(state.day_sign)}>
+          <Money className="num" value={state.day_change} />
+          {state.day_change_pct && (
+            <span className="num pct trend">
+              <Trend sign={state.day_sign} />
+              {state.day_change_pct}
+            </span>
+          )}
+        </dd>
+      </div>
+      <div>
+        <dt>未實現</dt>
+        <dd className={signClass(state.holdings_unrealized_sign)}>
+          <Money className="num" value={state.holdings_unrealized} />
+          {state.holdings_unrealized_pct && (
+            <span className="num pct trend">
+              <Trend sign={state.holdings_unrealized_sign} />
+              {state.holdings_unrealized_pct}
+            </span>
+          )}
+        </dd>
+      </div>
+    </>
   );
 }
 
@@ -115,48 +287,6 @@ function AllocRibbon({ state }: { state: State }) {
         ))}
       </ul>
     </div>
-  );
-}
-
-/** 持股 tile beside the total: market value, the last trading day and unrealized (moved off the 持股 card).
- *  Without holdings it shows the cash group instead, so the column is never empty. */
-export function HoldingsTile({ state }: { state: State }) {
-  if (state.holdings.length === 0) {
-    const cash = state.allocation_groups.groups.find(g => g.key === 'cash');
-    if (!cash) return null;
-    return (
-      <section className="tile tile-slate" aria-label="現金與存款">
-        <p className="tile-label">現金與存款</p>
-        <p className="tile-num">
-          <Money className="num" value={cash.value} />
-        </p>
-        <p className="tile-sub">佔總資產 {pct(cash.ratio)}</p>
-      </section>
-    );
-  }
-  return (
-    <section className="tile tile-indigo" aria-label="持股">
-      <p className="tile-label">持股市值</p>
-      <p className="tile-num">
-        <RollingMoney id="holdings" value={state.holdings_value} />
-      </p>
-      <p className="tile-sub">
-        <span>
-          最近交易日{' '}
-          <span className={`tile-pill ${signClass(state.day_sign)}`}>
-            <Trend sign={state.day_sign} />
-            {state.day_change_pct ?? <Money value={state.day_change} />}
-          </span>
-        </span>
-        <span>
-          未實現{' '}
-          <span className={`tile-pill ${signClass(state.holdings_unrealized_sign)}`}>
-            <Trend sign={state.holdings_unrealized_sign} />
-            <Money className="num" value={state.holdings_unrealized} />
-          </span>
-        </span>
-      </p>
-    </section>
   );
 }
 
@@ -280,7 +410,7 @@ function NetWorthChanges({ state }: { state: State }) {
   const high = h.reduce((best, p) => (amount(p.total) > amount(best.total) ? p : best), h[0]);
   const atHigh = now >= amount(high.total);
   return (
-    <dl className="metrics">
+    <>
       {rows.map(r => (
         <div key={r.label}>
           <dt>{r.label}</dt>
@@ -300,6 +430,6 @@ function NetWorthChanges({ state }: { state: State }) {
         <dt>最高點</dt>
         <dd>{atHigh ? <span className="small">就是現在</span> : <><Money className="num" value={signed(amount(high.total)).replace('+', '')} /><span className="num pct">{md(high.date)}</span></>}</dd>
       </div>
-    </dl>
+    </>
   );
 }

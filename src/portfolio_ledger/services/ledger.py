@@ -55,6 +55,8 @@ LOAN_INTEREST = "貸款利息"
 BROKER_TYPES = ("broker_tw", "broker_us")
 ZERO = Decimal(0)
 MAX_GROUPS = 6
+HOLDINGS_KEY = "_holdings"  # snapshot breakdown: holdings market value, for the 持股市值 chart
+INVEST_LABELS = ("台股", "美股", "港股", "海外股", "債券")  # the investment classes of _asset_classes
 log = logging.getLogger(__name__)
 
 
@@ -1557,7 +1559,9 @@ class Ledger:
             ),
             "allocation": self._allocation(v),
             "allocation_groups": self._allocation_groups(v),
-            "history": [{"date": d, "total": str(x)} for d, x in repo.list_snapshots(self.db)],
+            "history": [
+                {"date": d, "total": str(x), "holdings": _snapshot_holdings(b)} for d, x, b in repo.list_snapshot_breakdowns(self.db)
+            ],
             "holdings": holdings,
             "holdings_value": fmt.money(sum((h["value_twd"] for h in v["open"]), ZERO)),
             "holdings_unrealized": fmt.money(sum((h["unrealized_twd"] for h in v["open"]), ZERO), signed=True),
@@ -1756,6 +1760,7 @@ class Ledger:
         if not v["txs"]:
             return
         breakdown = {g["label"]: g["value"] for g in self._allocation(v)}
+        breakdown[HOLDINGS_KEY] = str(sum((h["value_twd"] for h in v["open"]), ZERO))
         repo.put_snapshot(self.db, self.today().isoformat(), v["total"], breakdown)
 
     # ── quotes ──────────────────────────────────────────────────────────
@@ -1883,6 +1888,16 @@ class Ledger:
                     t.fx_rate if t.fx_rate is not None else "", t.note,
                 ])  # fmt: skip
         return dest
+
+
+def _snapshot_holdings(breakdown: dict[str, Any]) -> str | None:
+    """Holdings value on a snapshot day. Older snapshots lack the key: sum their investment classes,
+    unless the tail was folded into 其他 (then the split is unknown)."""
+    if HOLDINGS_KEY in breakdown:
+        return str(breakdown[HOLDINGS_KEY])
+    if "其他" in breakdown:
+        return None
+    return str(sum((Decimal(str(x).replace(",", "")) for k, x in breakdown.items() if k in INVEST_LABELS), ZERO))
 
 
 def _annual(rate: float | None) -> str | None:

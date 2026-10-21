@@ -643,6 +643,11 @@ def list_snapshots(db: Db) -> list[tuple[str, Decimal]]:
     return [(r["date"], Decimal(r["total_twd"])) for r in db.query("SELECT date, total_twd FROM snapshots ORDER BY date")]
 
 
+def list_snapshot_breakdowns(db: Db) -> list[tuple[str, Decimal, dict[str, Any]]]:
+    rows = db.query("SELECT date, total_twd, breakdown_json FROM snapshots ORDER BY date")
+    return [(r["date"], Decimal(r["total_twd"]), json.loads(r["breakdown_json"])) for r in rows]
+
+
 def get_setting(db: Db, key: str, default: str) -> str:
     rows = db.query("SELECT value FROM settings WHERE key = ?", (key,))
     return rows[0]["value"] if rows else default

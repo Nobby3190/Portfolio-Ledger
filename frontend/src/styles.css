@@ -18,6 +18,10 @@
   --shade-4: #a9b3be;
   --shade-5: #c8d0d8;
   --shade-6: #e1e6eb;
+  /* 資產 dashboard: the line (≥ 3:1 on --page), the earlier period recessive, the chosen tab's underline */
+  --c-line: #3a87a3;
+  --c-prev: #c3c9d2;
+  --c-tab: #3b5bdb;
   --brand: #4b54d8; /* indigo: chart lines, meters (繽紛版 2026-10-19; was slate #4a6178) */
   --brand-soft: #b9bdf2;
   --gold: #7a5bd6; /* accent (silver-blue; the name is from the old brass): title rules, small accents */
@@ -69,6 +73,9 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --c-line: #7ab8cc;
+    --c-prev: #3a404b;
+    --c-tab: #5c7cfa;
     --page: #0d1116;
     --card: #151b22;
     --card-2: #1c242d;
@@ -549,6 +556,197 @@ kbd {
   margin-top: 18px;
 }
 
+/* Dashboard: range + 對照前期 above, then the two figures as tabs (the chosen one underlined).
+   On the page background with the page's own tokens, so it follows light/dark like the rest. */
+.board {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0 8px;
+}
+
+.board .hero-num {
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+
+.board .ribbon {
+  margin: 20px 0 0;
+  padding: 16px 0 0;
+  background: none;
+  border-top: 1px solid var(--rule);
+  border-radius: 0;
+}
+
+.board .ribbon-legend {
+  color: var(--muted);
+}
+
+.board .ribbon-legend b {
+  color: var(--ink);
+}
+
+.board .ribbon-seg.on {
+  box-shadow: 0 0 0 2px var(--page);
+}
+
+.board .ribbon-seg:focus-visible {
+  outline-color: var(--ink);
+}
+.hero-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-bottom: 20px;
+}
+
+.hero-tools .seg button {
+  flex: none;
+  padding: 6px 12px;
+  font-size: 14px;
+}
+
+.hero-compare {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.hero-compare input {
+  accent-color: var(--brand);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
+.hero-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 44px;
+}
+
+.hero-tab {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 0 0 12px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  min-width: 0;
+}
+
+button.hero-tab {
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s, border-color 0.15s;
+}
+
+button.hero-tab:hover,
+button.hero-tab.on {
+  opacity: 1;
+}
+
+button.hero-tab.on {
+  border-bottom-color: var(--c-tab);
+}
+
+.hero-tab .hero-num {
+  display: block;
+}
+
+/* two figures side by side: a size smaller than the lone total */
+.hero-tabs.pair .hero-num {
+  font-size: clamp(30px, 3.8vw, 48px);
+}
+
+.hero-delta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 15px;
+}
+
+.hero-delta .muted {
+  font-size: 13px;
+}
+
+.board .area-top {
+  stop-opacity: 0.16;
+}
+
+/* twice the usual weight (2026-10-21) */
+.board .ln.quiet {
+  stroke-dasharray: none;
+  stroke-width: 4;
+}
+
+.board .ln.main {
+  stroke-width: 4.5;
+}
+
+.board .chart .dot {
+  r: 5.5;
+}
+
+/* 股利 beside 資產配置: a plain card, the figure and its split by holding */
+.div-tile .card-head {
+  margin-bottom: 6px;
+}
+
+.div-tile p {
+  margin: 0;
+}
+
+.div-tile-num {
+  font: 750 32px/1.15 var(--num);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.div-tile-num .num {
+  font-weight: inherit;
+}
+
+.div-tile-sub {
+  margin-top: 8px !important;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 13px;
+}
+
+.div-tile-band {
+  display: flex;
+  gap: 3px;
+  height: 10px;
+  margin-top: 14px;
+}
+
+.div-tile-band span {
+  border-radius: 3px;
+  background: var(--brand);
+}
+
+.tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tip-row b {
+  margin-left: auto;
+  padding-left: 14px;
+}
+
 .stats {
   display: grid;
   align-content: space-between;
@@ -687,7 +885,8 @@ kbd {
 }
 
 /* Billow-style change badge: arrow + %, tinted with the gain/loss colour. */
-.metrics .pct.trend {
+.metrics .pct.trend,
+.hero-delta .pct.trend {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -3635,95 +3834,6 @@ body {
   display: none;
 }
 
-/* ── solid tiles ── */
-.tile {
-  position: relative;
-  overflow: hidden;
-  border-radius: 22px;
-  padding: 20px 22px;
-  color: var(--on-solid);
-  background: var(--bg);
-  box-shadow: var(--shadow);
-  min-width: 0;
-}
-.tile::after {
-  content: '';
-  position: absolute;
-  right: -44px;
-  top: -44px;
-  width: 150px;
-  height: 150px;
-  border-radius: 50%;
-  background: rgb(255 255 255 / 0.07);
-  pointer-events: none;
-}
-.tile-indigo {
-  --bg: var(--s-indigo);
-}
-.tile-teal {
-  --bg: var(--s-teal);
-}
-.tile-slate {
-  --bg: var(--s-slate);
-}
-.tile p {
-  margin: 0;
-}
-.tile-label {
-  font-size: 13px;
-  font-weight: 400;
-  color: rgb(255 255 255 / 0.76);
-}
-.tile-num {
-  font: 750 32px/1.15 var(--num);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  margin-top: 6px !important;
-}
-.tile-num .num {
-  font-weight: inherit;
-}
-.tile-sub {
-  margin-top: 8px !important;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  align-items: center;
-  font-size: 13px;
-  font-weight: 400;
-  color: rgb(255 255 255 / 0.76);
-}
-/* up/down on a coloured tile: a white pill keeps the red/green readable */
-.tile-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 8px 1px 6px;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #3a4656;
-  font: 600 13px var(--num);
-  font-variant-numeric: tabular-nums;
-}
-.app.up-red .tile-pill.up,
-.app.up-green .tile-pill.down {
-  color: #c0392b;
-}
-.app.up-red .tile-pill.down,
-.app.up-green .tile-pill.up {
-  color: #1f7a4d;
-}
-.tile-band {
-  display: flex;
-  gap: 3px;
-  height: 10px;
-  margin-top: 14px;
-}
-.tile-band span {
-  border-radius: 3px;
-  background: #ffffff;
-}
-
 /* ── holdings: ticker chips in the market's colour, weight bars ── */
 .holdings-t .code {
   display: inline-block;
@@ -4301,16 +4411,6 @@ body {
     --csh-3: #a6eee4;
     --csh-4: #46b3a6;
     --csh-5: #92e6da;
-  }
-  /* 色磚: one indigo family, white text ≥ 5.7:1 */
-  .tile-slate {
-    --bg: #2e3270;
-  }
-  .tile-indigo {
-    --bg: #3f47c4;
-  }
-  .tile-teal {
-    --bg: #5a55d0;
   }
   .rail-assets,
   .rail-money,

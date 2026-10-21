@@ -12,7 +12,7 @@ import { LoansCard } from './components/Loans';
 import { MoneyView } from './components/MoneyView';
 import { AccountsPanel, CategoriesPanel, SettingsPanel } from './components/Panels';
 import { PlanView } from './components/PlanView';
-import { AllocationCard, HoldingsTile, NetWorthCard } from './components/Summary';
+import { AllocationCard, NetWorthCard } from './components/Summary';
 import { Icon, type IconName } from './lib/icons';
 import { accountColor } from './lib/institutions';
 import { FreshContext } from './lib/motion';
@@ -290,11 +290,7 @@ export default function App() {
             )}
             {view === 'assets' && (
               <div className="grid">
-                <NetWorthCard state={state} className="span-8" />
-                <div className="stack span-4">
-                  <HoldingsTile state={state} />
-                  <DividendsTile state={state} />
-                </div>
+                <NetWorthCard state={state} className="span-12" />
                 {state.transactions.length === 0 && state.accounts.length > 0 && <FirstSteps onAdd={() => setComposer({ editId: null })} />}
                 {/* investments first: tracking them is one of the reasons for the app (2026-10-13) */}
                 <Holdings
@@ -317,6 +313,7 @@ export default function App() {
                   onBuy={() => setComposer({ editId: null, kind: 'buy' })}
                 />
                 <div className="stack span-4">
+                  <DividendsTile state={state} />
                   <AllocationCard state={state} />
                 </div>
                 <DividendsCard state={state} />

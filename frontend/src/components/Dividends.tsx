@@ -25,18 +25,22 @@ function useDividends(state: State) {
 export function DividendsTile({ state }: { state: State }) {
   const data = useDividends(state);
   if (!data || !data.has) return null;
+  // A plain card like 持股 and the rest (2026-10-21; was a solid teal tile).
   return (
-    <section className="tile tile-teal" aria-label="股利">
-      <p className="tile-label">股利　近 12 個月</p>
-      <p className="tile-num">
+    <section className="card div-tile" aria-labelledby="div-tile-h">
+      <header className="card-head">
+        <h2 id="div-tile-h">股利</h2>
+        <span className="aside">近 12 個月</span>
+      </header>
+      <p className="div-tile-num">
         <Money className="num" value={data.ttm} />
       </p>
-      <p className="tile-sub">
+      <p className="div-tile-sub muted">
         {data.yield_on_cost && <span>成本殖利率 {data.yield_on_cost.replace(/^\+/, '')}</span>}
         {data.cover && <span>可支付生活支出 {data.cover.replace(/^\+/, '')}</span>}
       </p>
       {data.by_symbol.length > 1 && (
-        <div className="tile-band" role="img" aria-label={data.by_symbol.map(s => `${s.symbol} ${Math.round(s.ratio * 100)}%`).join('，')}>
+        <div className="div-tile-band" role="img" aria-label={data.by_symbol.map(s => `${s.symbol} ${Math.round(s.ratio * 100)}%`).join('，')}>
           {data.by_symbol.map((s, i) => (
             <span key={s.symbol} style={{ flexGrow: Math.max(s.ratio, 0.02), opacity: 1 - Math.min(i, 4) * 0.17 }} title={`${s.symbol} ${Math.round(s.ratio * 100)}%`} />
           ))}
