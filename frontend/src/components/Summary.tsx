@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Money, RollingMoney, signClass, Trend } from '../lib/privacy';
 import type { State } from '../types';
 import { LineChart } from './Charts';
@@ -228,14 +228,25 @@ function HoldingsChanges({ state }: { state: State }) {
 
 /** The allocation as one thick band along the bottom of the total (大膽版); the 資產配置 card keeps the rows.
  *  The slate shades are close, so pointing at a segment or its legend entry lifts it, dims the rest and
- *  shows its name, share and amount (2026-10-16). Segments are focusable for the keyboard too. */
+ *  shows its name, share and amount (2026-10-16). Segments are focusable for the keyboard too.
+ *  The tip is centred on its segment, then shifted back inside the bar when it would stick out (2026-10-21). */
 function AllocRibbon({ state }: { state: State }) {
   const { groups } = state.allocation_groups;
   const [on, setOn] = useState<string | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const tipRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const tip = tipRef.current;
+    const bar = barRef.current;
+    if (!tip || !bar) return;
+    tip.style.setProperty('--dx', '0px');
+    const t = tip.getBoundingClientRect();
+    const b = bar.getBoundingClientRect();
+    const dx = t.left < b.left ? b.left - t.left : t.right > b.right ? b.right - t.right : 0;
+    tip.style.setProperty('--dx', `${dx}px`);
+  }, [on]);
   if (groups.length === 0) return null;
   const items = groups.flatMap(g => g.items.map((i, n) => ({ ...i, key: `${g.key}-${i.label}`, c: swatch(g.key, n), group: g.label })));
-  const first = items[0]?.key;
-  const last = items[items.length - 1]?.key;
   const hover = (key: string) => ({
     onMouseEnter: () => setOn(key),
     onMouseLeave: () => setOn(k => (k === key ? null : k)),
@@ -244,7 +255,7 @@ function AllocRibbon({ state }: { state: State }) {
   });
   return (
     <div className={`ribbon ${on ? 'pointing' : ''}`}>
-      <div className="ribbon-bar" role="list" aria-label="資產配置">
+      <div ref={barRef} className="ribbon-bar" role="list" aria-label="資產配置">
         {groups.map(g => (
           <span key={g.key} className="ribbon-group" style={{ flexGrow: Math.max(g.ratio, 0.03) }}>
             {g.items.map((i, n) => {
@@ -260,7 +271,7 @@ function AllocRibbon({ state }: { state: State }) {
                   {...hover(key)}
                 >
                   {on === key && (
-                    <span className={`tip ribbon-tip ${key === first ? 'at-start' : key === last ? 'at-end' : ''}`} role="tooltip">
+                    <span ref={tipRef} className="tip ribbon-tip" role="tooltip">
                       <span className="ribbon-tip-name">
                         <i style={{ background: swatch(g.key, n) }} aria-hidden />
                         {i.label}

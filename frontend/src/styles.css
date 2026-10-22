@@ -4134,23 +4134,13 @@ body {
   bottom: calc(100% + 12px);
   left: 50%;
   z-index: 3;
-  transform: translateX(-50%) scaleY(0.74); /* undo the segment's scaleY */
+  /* --dx: set by AllocRibbon to keep the tip inside the bar; scaleY undoes the segment's */
+  transform: translateX(calc(-50% + var(--dx, 0px))) scaleY(0.74);
   transform-origin: bottom center;
   gap: 4px;
   padding: 8px 12px;
   font-size: 13px;
   border-radius: 10px;
-}
-.ribbon-tip.at-start {
-  left: 0;
-  transform: scaleY(0.74);
-  transform-origin: bottom left;
-}
-.ribbon-tip.at-end {
-  left: auto;
-  right: 0;
-  transform: scaleY(0.74);
-  transform-origin: bottom right;
 }
 .ribbon-tip-name {
   display: flex;
