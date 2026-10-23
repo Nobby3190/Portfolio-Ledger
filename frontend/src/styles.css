@@ -1,71 +1,71 @@
-/* 帳本 Ledger — slate ink on cool white, with a silver-blue accent (2026-10-13; was navy + brass).
+/* 帳本 Ledger — light: brown ink on warm cream, orange + ochre accents (暖色版 2026-10-21); dark: slate with a silver-blue accent.
    Blocks are panels; numbers sit in aligned columns.
    Red/green are reserved for gains/losses; the brand slate-blue carries charts and meters;
    the allocation card gets its own categorical palette (no red/green in it). */
 
 :root {
-  --page: #f3f4f8;
-  --card: #ffffff;
-  --card-2: #eef0f5; /* hover, inputs, chips */
-  --ink: #1e2530;
-  --ink-2: #3a4656;
-  --muted: #566273; /* secondary text: ≥ 6:1 on --card */
-  --faint: #8794a3; /* tertiary only: axis ticks, placeholders */
-  --rule: #e2e5ec;
-  --shade-1: #1e2530;
-  --shade-2: #4a5868;
-  --shade-3: #7f8b99;
-  --shade-4: #a9b3be;
-  --shade-5: #c8d0d8;
-  --shade-6: #e1e6eb;
+  --page: #fbf4e9;
+  --card: #fffdf8;
+  --card-2: #f6ecdd; /* hover, inputs, chips */
+  --ink: #2b2017;
+  --ink-2: #4b3a2b;
+  --muted: #6b5846; /* secondary text: ≥ 6:1 on --card */
+  --faint: #a8927b; /* tertiary only: axis ticks, placeholders */
+  --rule: #eddfcc;
+  --shade-1: #2b2017;
+  --shade-2: #5a4633;
+  --shade-3: #8a735c;
+  --shade-4: #b6a18b;
+  --shade-5: #d8c8b3;
+  --shade-6: #ede2d3;
   /* 資產 dashboard: the line (≥ 3:1 on --page), the earlier period recessive, the chosen tab's underline */
-  --c-line: #3a87a3;
-  --c-prev: #c3c9d2;
-  --c-tab: #3b5bdb;
-  --brand: #4b54d8; /* indigo: chart lines, meters (繽紛版 2026-10-19; was slate #4a6178) */
-  --brand-soft: #b9bdf2;
-  --gold: #7a5bd6; /* accent (silver-blue; the name is from the old brass): title rules, small accents */
-  --gold-soft: #e4ddf8;
-  --red: #c0392b;
-  --green: #1f7a4d;
-  --warn: #b45309;
+  --c-line: #c8571a;
+  --c-prev: #e5d4c0;
+  --c-tab: #d9661f;
+  --brand: #d9661f; /* orange: chart lines, meters (暖色版 2026-10-21; was indigo #4b54d8) */
+  --brand-soft: #f7cfad;
+  --gold: #c9961c; /* accent (ochre): title rules, small accents */
+  --gold-soft: #f8e7b6;
+  --red: #b3261e;
+  --green: #2e7d4f;
+  --warn: #a35a00;
   /* allocation: investments deep, cash-like light */
-  --inv-1: #4b54d8;
-  --inv-2: #7a5bd6;
-  --inv-3: #3a40a8;
-  --inv-4: #9a8ee6;
-  --inv-5: #6a63c9;
-  --csh-1: #5cbfb3;
-  --csh-2: #8fd3ca;
-  --csh-3: #3fa89c;
-  --csh-4: #bfe6e0;
-  --csh-5: #a6dcd4;
+  --inv-1: #d9661f;
+  --inv-2: #e8932f;
+  --inv-3: #a8461a;
+  --inv-4: #f0b866;
+  --inv-5: #c47a33;
+  --csh-1: #8c9a4a;
+  --csh-2: #b4c07c;
+  --csh-3: #6d7c36;
+  --csh-4: #d8ddb0;
+  --csh-5: #a2ad64;
   /* 大膽版 (2026-10-16). hue-*: lines, bars and text on cards (≥ 4.5:1 on --card). tone-*: solid squares and
      tiles under white icons/text. s-*: the big tiles, the same in both themes. None is red, green or amber. */
-  --hue-indigo: #4b54d8;
-  --hue-sky: #0a72b8;
-  --hue-teal: #0a7d72;
-  --hue-plum: #9a35b8;
-  --hue-sand: #97661c;
-  --tone-indigo: #4b54d8;
-  --tone-sky: #0a72b8;
-  --tone-teal: #0a7d72;
-  --tone-plum: #9a35b8;
-  --tone-sand: #97661c;
-  --tone-expense: #5560a8;
-  --tone-income: #0f7fa3;
-  --tone-neutral: #8794a3;
-  --s-slate: #2c3644;
-  --s-indigo: #3f47c4;
-  --s-sky: #09649f;
-  --s-teal: #086b62;
-  --s-plum: #842ba0;
-  --s-sand: #7e5414;
+  --hue-indigo: #b8501a;
+  --hue-sky: #8a6510;
+  --hue-teal: #5c762a;
+  --hue-plum: #9c3b48;
+  --hue-sand: #7a5330;
+  --tone-indigo: #c8581c;
+  --tone-sky: #a87412;
+  --tone-teal: #647f2c;
+  --tone-plum: #a3404c;
+  --tone-sand: #835a34;
+  --tone-expense: #b0603a;
+  --tone-income: #a07a1a;
+  --tone-neutral: #a8927b;
+  --s-slate: #3b2d21;
+  --s-indigo: #c8561a;
+  --s-sky: #a36c0e;
+  --s-teal: #5a7228;
+  --s-plum: #8f3442;
+  --s-sand: #6e4a28;
   --on-solid: #ffffff;
   /* how much of its colour a card header / a category tile takes (亮色: cards stay plain, see the end of the file) */
   --card-wash: 0%;
   --tile-wash: 12%;
-  --shadow: 0 1px 2px rgb(30 37 48 / 0.04), 0 10px 28px -16px rgb(30 37 48 / 0.18);
+  --shadow: 0 1px 2px rgb(90 55 20 / 0.05), 0 10px 28px -16px rgb(90 55 20 / 0.22);
   --num: 'Bricolage Grotesque Variable', -apple-system, 'PingFang TC', sans-serif;
   --text: -apple-system, 'PingFang TC', 'Noto Sans TC', sans-serif;
   color-scheme: light;
@@ -4374,33 +4374,57 @@ body {
   text-align: right;
 }
 
-/* ── 亮色：卡片中性，顏色只給資料 (2026-10-19) ──────────────────────
+/* ── 亮色：卡片中性，顏色只給資料 (2026-10-19；2026-10-21 改暖色：主色橘、主卡橘色漸層) ──────
    使用者覺得每張卡各一個顏色、三頁主卡三種顏色，看起來不統一。亮色模式下，介面外框（卡片的小方塊、
-   邊框、卡內的條、主卡、色磚、側欄、結論條）一律用主色靛藍；色票只留給資料：分類圖示與方塊、
+   邊框、卡內的條、主卡、色磚、側欄、結論條）一律用主色橘；色票只留給資料：分類圖示與方塊、
    持股代號、圖表、資產配置色帶、儲蓄目標環。暗色維持每卡一色。放在檔尾，蓋過前面同權重的規則。 */
 @media (prefers-color-scheme: light) {
   .card[aria-labelledby] {
     --a: var(--brand);
     border-color: var(--rule);
   }
+  /* the total: the one dark panel, espresso with an orange glow, so up/down colours still read */
   .app .card.hero {
-    --card: #3a40b0;
+    --card: #3a2618;
+    --card-2: #4a3221;
+    --ink: #fbf1e4;
+    --ink-2: #f0dfc9;
+    --muted: #d6bfa3;
+    --faint: #a88d70;
+    --brand: #ffa552;
     border-color: transparent;
     background:
-      radial-gradient(120% 90% at 100% 0%, rgb(160 140 255 / 0.35), transparent 55%),
-      linear-gradient(155deg, #4b54d8 0%, #3a3fb4 50%, #26277a 100%);
-    box-shadow: 0 18px 40px -20px rgb(60 64 200 / 0.6);
-    /* allocation bar on indigo: investments lavender, cash mint */
-    --inv-1: #d9d6ff;
-    --inv-2: #b9b2ff;
-    --inv-3: #ece9ff;
-    --inv-4: #9d95f0;
-    --inv-5: #c8c2ff;
-    --csh-1: #7fe0d2;
-    --csh-2: #5cc9bb;
-    --csh-3: #a6eee4;
-    --csh-4: #46b3a6;
-    --csh-5: #92e6da;
+      radial-gradient(120% 90% at 100% 0%, rgb(255 150 60 / 0.32), transparent 55%),
+      radial-gradient(90% 80% at 0% 100%, rgb(230 180 60 / 0.16), transparent 60%),
+      linear-gradient(155deg, #5a3820 0%, #3a2618 55%, #24170e 100%);
+    box-shadow: 0 18px 40px -20px rgb(90 50 15 / 0.6);
+    /* allocation bar: investments orange/yellow, cash sage */
+    --inv-1: #ff9f4a;
+    --inv-2: #ffc75e;
+    --inv-3: #e8722a;
+    --inv-4: #ffdf9c;
+    --inv-5: #f2a93b;
+    --csh-1: #a9b86a;
+    --csh-2: #c8d494;
+    --csh-3: #8a9a4e;
+    --csh-4: #dfe6bb;
+    --csh-5: #b7c47f;
+  }
+  .app .card.hero .label {
+    color: #f3cf9c;
+  }
+  .app .card.hero .tip {
+    background: #24170e;
+  }
+  .app .ribbon-legend {
+    color: var(--muted);
+  }
+  .app .ribbon-legend b,
+  .app .ribbon-legend li.on {
+    color: var(--ink);
+  }
+  .app .budget-ring:not(.near):not(.over) .fill {
+    stroke: var(--brand);
   }
   .rail-assets,
   .rail-money,
