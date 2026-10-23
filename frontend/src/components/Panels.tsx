@@ -193,6 +193,9 @@ export function AccountsPanel({ state, onState, onClose }: { state: State; onSta
         principal: a.principal ?? '',
         term_years: a.term_years ?? '',
         grace_years: a.grace_years ?? '',
+        statement_day: a.statement_day?.toString() ?? '',
+        pay_day: a.pay_day?.toString() ?? '',
+        autopay: a.autopay ?? '',
         archived: a.archived,
         color: a.color ?? '',
       },
@@ -259,6 +262,7 @@ export function AccountsPanel({ state, onState, onClose }: { state: State; onSta
             initial={v.input}
             types={state.account_types}
             currencies={state.currencies}
+            payers={state.accounts.filter(x => !x.archived && !DEBT_TYPES.includes(x.type))}
             error={error}
             onSave={async a => done(await api.saveAccount(a))}
             onCancel={() => go({ step: 'list' })}
@@ -586,6 +590,7 @@ function AccountForm(props: {
   initial: AccountInput;
   types: Record<string, string>;
   currencies: Record<string, string>;
+  payers: AccountRow[]; // accounts a card's bill can be paid from
   error: string | null;
   onSave(a: AccountInput): void;
   onCancel(): void;
@@ -687,6 +692,39 @@ function AccountForm(props: {
               <input type="date" value={a.maturity_date ?? ''} onChange={e => set({ maturity_date: e.target.value })} />
             </label>
           </div>
+        </>
+      )}
+      {a.type === 'credit' && (
+        <>
+          <div className="field-row two">
+            <div className="field">
+              <span className="field-head">
+                <label htmlFor="acct-statement">結帳日</label>
+                <HelpTip label="卡費怎麼算">
+                  扣款日扣「結帳日那天的帳單金額」，再減掉結帳日之後已經繳的部分。沒設自動扣繳的卡，繳費時寫
+                  <code>還 @{a.name || '信用卡'} @銀行</code>，不寫金額就帶入本期帳單。
+                </HelpTip>
+              </span>
+              <input id="acct-statement" value={a.statement_day ?? ''} inputMode="numeric" placeholder="5" onChange={e => set({ statement_day: e.target.value })} />
+            </div>
+            <label>
+              扣款日
+              <input value={a.pay_day ?? ''} inputMode="numeric" placeholder="20" onChange={e => set({ pay_day: e.target.value })} />
+            </label>
+          </div>
+          <label>
+            自動扣繳
+            <select value={a.autopay ?? ''} onChange={e => set({ autopay: e.target.value })}>
+              <option value="">不自動扣</option>
+              {props.payers
+                .filter(p => p.currency === (a.currency || 'TWD'))
+                .map(p => (
+                  <option key={p.id} value={p.name}>
+                    {p.name}
+                  </option>
+                ))}
+            </select>
+          </label>
         </>
       )}
       {a.type === 'loan' && (

@@ -52,6 +52,8 @@ class Account:
     term_years: Decimal | None = None
     grace_years: Decimal | None = None
     color: str | None = None  # '#rrggbb' picked by hand; None = from the bank/broker in the name
+    statement_day: int | None = None  # credit cards: 結帳日 and 扣款日, day of month
+    pay_day: int | None = None
 
 
 @dataclass

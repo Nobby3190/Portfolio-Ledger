@@ -70,7 +70,7 @@ def dated(line: str, day: str) -> str:
 
 def run_due(lg: Ledger) -> int:
     """Post everything due up to today; a failing rule stops at that date and keeps the error. Returns how many."""
-    from .ledger import EntryError, QuoteNotYet
+    from .ledger import EntryError, NothingDue, QuoteNotYet
 
     today = lg.today()
     posted = 0
@@ -92,6 +92,8 @@ def run_due(lg: Ledger) -> int:
                             posted += 1
                     except QuoteNotYet:
                         break  # 定額 before the close: try again after the next quote refresh
+                    except NothingDue:
+                        pass  # 還 @卡: this bill is already paid
                     except EntryError as e:
                         log.warning("recurring %s on %s: %s", rule.id, day, e)
                         rule.error = f"{day}：{e}"
@@ -119,7 +121,7 @@ def _plain_line(lg: Ledger, line: str) -> str:
     if cmd.missing:
         raise EntryError("還缺金額")
     preview = lg.preview(line)
-    if preview["status"] != "ready":
+    if preview["status"] != "ready" and not preview.get("settled"):
         raise EntryError(preview.get("message") or "這一行記不進去")
     return format_command(
         cmd.action, symbol=cmd.symbol, amount=cmd.amount, account=cmd.account, to_account=cmd.to_account,
@@ -246,8 +248,11 @@ def rows(lg: Ledger) -> list[dict[str, Any]]:
     for r in repo.list_recurring(lg.db):
         p = lg.preview(r.line)
         cmd = parse(r.line, lg.today())
+        bill = p.get("card") or p.get("settled")  # 還 @卡 without an amount: the bill changes every month
         amount = p.get("total") if p["status"] == "ready" else (fmt.money(cmd.amount) if cmd.amount else None)
         each = _figure(amount)
+        if bill and cmd.amount is None:
+            amount, each = "帳單金額", None
         category = cmd.category or {"expense": "其他", "income": "其他收入"}.get(cmd.action)
         # No note: an income/expense rule is called by its category (薪資), others by the preview title.
         named = category if cmd.action in ("income", "expense") and cmd.category else None

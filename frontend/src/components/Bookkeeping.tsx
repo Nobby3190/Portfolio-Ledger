@@ -317,7 +317,7 @@ export function RecurringPanel({ state, onState, onClose, onToast }: { state: St
                 <span className="cell r hide-sm">
                   <span className="small">{!r.active ? '—' : r.next_date ? shortDate(r.next_date, state.today) : '已結束'}</span>
                 </span>
-                <span className="cell r">{r.amount ? <Money className="num" value={r.amount} /> : <span className="muted small">月付</span>}</span>
+                <span className="cell r">{r.amount === '帳單金額' ? <span className="muted small">帳單金額</span> : r.amount ? <Money className="num" value={r.amount} /> : <span className="muted small">月付</span>}</span>
               </button>
             ))}
           </div>

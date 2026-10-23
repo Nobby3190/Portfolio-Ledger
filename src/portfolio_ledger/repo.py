@@ -41,6 +41,8 @@ def _account(r: sqlite3.Row) -> Account:
         term_years=_d(r["term_years"]),
         grace_years=_d(r["grace_years"]),
         color=r["color"],
+        statement_day=r["statement_day"],
+        pay_day=r["pay_day"],
     )
 
 
@@ -58,21 +60,21 @@ def save_account(db: Db, a: Account) -> int:
     values = (
         a.name, a.type, a.currency, _s(a.fee_discount), _s(a.fee_min), int(a.archived), a.sort,
         _s(a.rate), a.start_date, a.maturity_date, a.group_name, _s(a.principal), _s(a.term_years), _s(a.grace_years),
-        a.color,
+        a.color, a.statement_day, a.pay_day,
     )  # fmt: skip
     with db.write() as c:
         if a.id is None:
             cur = c.execute(
                 "INSERT INTO accounts (name, type, currency, fee_discount, fee_min, archived, sort,"
-                " rate, start_date, maturity_date, group_name, principal, term_years, grace_years, color)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " rate, start_date, maturity_date, group_name, principal, term_years, grace_years, color,"
+                " statement_day, pay_day) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 values,
             )
             return int(cur.lastrowid or 0)
         c.execute(
             "UPDATE accounts SET name=?, type=?, currency=?, fee_discount=?, fee_min=?, archived=?, sort=?,"
             " rate=?, start_date=?, maturity_date=?, group_name=?, principal=?, term_years=?, grace_years=?,"
-            " color=? WHERE id=?",
+            " color=?, statement_day=?, pay_day=? WHERE id=?",
             (*values, a.id),
         )
         return a.id

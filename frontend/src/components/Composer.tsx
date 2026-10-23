@@ -73,7 +73,7 @@ function blank(state: State, kind: ComposerKind = 'expense'): TxFields {
 
 function defaultAccount(state: State, kind: ComposerKind, more: MoreKind): string {
   const live = state.accounts.filter(a => !a.archived);
-  if (kind === 'more' && more === 'repay') return live.find(a => a.type === 'loan')?.name ?? '';
+  if (kind === 'more' && more === 'repay') return (live.find(a => a.type === 'loan') ?? live.find(a => a.type === 'credit'))?.name ?? '';
   const needsCash = kind === 'expense' || kind === 'income' || kind === 'transfer' || (kind === 'more' && (more === 'deposit' || more === 'withdraw'));
   if (!needsCash) return ''; // trades: let the symbol pick the broker account
   return (live.find(a => SPENDING.includes(a.type) && a.currency === 'TWD') ?? live.find(a => SPENDING.includes(a.type)) ?? live[0])?.name ?? '';
@@ -142,7 +142,7 @@ function missingFields(f: TxFields): string[] {
     need(f.symbol, '股票代號');
     need(f.amount, '金額');
   } else if (f.kind === 'more' && f.more === 'repay') {
-    need(f.account, '貸款帳戶');
+    need(f.account, '貸款或信用卡');
   } else if (f.kind === 'more' && (f.more === 'stock_dividend' || f.more === 'split')) {
     need(f.symbol, '股票代號');
     need(f.qty, f.more === 'split' ? '分割比例' : '股數');
@@ -254,6 +254,7 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
   const to = accounts.find(a => a.name === f.to_account);
   const crossFx = from && to && from.currency !== to.currency && (from.currency === 'TWD' || to.currency === 'TWD');
   const repay = f.kind === 'more' && f.more === 'repay';
+  const cardPay = repay && from?.type === 'credit';
   const dca = f.kind === 'buy' && !!f.dca;
   const usesAmount =
     ['expense', 'income', 'transfer', 'cash_dividend'].includes(f.kind) || dca || (f.kind === 'more' && (f.more === 'deposit' || f.more === 'withdraw' || repay));
@@ -340,7 +341,7 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
               ref={f.kind === 'cash_dividend' || dca ? undefined : firstField}
               className="num"
               inputMode="decimal"
-              placeholder={repay ? '空白＝這期月付' : dca ? '每期金額' : '0'}
+              placeholder={cardPay ? '空白＝本期帳單' : repay ? '空白＝這期月付' : dca ? '每期金額' : '0'}
               value={f.amount}
               aria-label="金額"
               onChange={e => set({ amount: e.target.value })}
@@ -458,22 +459,29 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
         {repay ? (
           <>
             <div className="field-row two">
-              <Field label="還哪一筆貸款">
-                <AccountSelect accounts={accounts.filter(a => a.type === 'loan')} value={f.account} onChange={account => set({ account })} placeholder="選擇貸款" />
+              <Field label="還哪一筆">
+                <AccountSelect
+                  accounts={accounts.filter(a => a.type === 'loan' || a.type === 'credit')}
+                  value={f.account}
+                  onChange={account => set({ account, interest: '' })}
+                  placeholder="選擇貸款或信用卡"
+                />
               </Field>
               <Field label="從哪個帳戶付">
-                <AccountSelect accounts={accounts.filter(a => a.type !== 'loan')} value={f.to_account} onChange={to_account => set({ to_account })} />
+                <AccountSelect accounts={accounts.filter(a => a.type !== 'loan' && a.type !== 'credit')} value={f.to_account} onChange={to_account => set({ to_account })} />
               </Field>
             </div>
             <div className="field-row two">
-              <Field label="利息" hint="空白＝剩餘本金 × 年利率 ÷ 12">
-                <input className="num" inputMode="decimal" value={f.interest ?? ''} placeholder="自動" onChange={e => set({ interest: e.target.value })} />
-              </Field>
+              {!cardPay && (
+                <Field label="利息" hint="空白＝剩餘本金 × 年利率 ÷ 12">
+                  <input className="num" inputMode="decimal" value={f.interest ?? ''} placeholder="自動" onChange={e => set({ interest: e.target.value })} />
+                </Field>
+              )}
               <Field label="日期">
                 <input type="date" value={f.date} max={state.today} onChange={e => set({ date: e.target.value || state.today })} />
               </Field>
             </div>
-            {accounts.every(a => a.type !== 'loan') && <p className="muted small">先到「帳戶」新增一個「貸款」帳戶。</p>}
+            {accounts.every(a => a.type !== 'loan' && a.type !== 'credit') && <p className="muted small">先到「帳戶」新增一個「貸款」或「信用卡」帳戶。</p>}
           </>
         ) : f.kind === 'transfer' ? (
           <>

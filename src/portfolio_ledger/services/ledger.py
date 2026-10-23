@@ -6,6 +6,7 @@ plus self._lock around the multi-step operations.
 
 from __future__ import annotations
 
+import calendar
 import csv
 import logging
 import re
@@ -68,6 +69,10 @@ DCA_NOTE = "定期定額"  # a 定額 buy priced at the close (an estimate of th
 DCA_CONFIRMED = "定期定額（已對帳）"
 
 
+class NothingDue(EntryError):
+    """還 @卡 without an amount when the bill is already paid; a recurring rule just moves on."""
+
+
 class QuoteNotYet(EntryError):
     """定額: the close it buys at is not published yet; a recurring rule waits instead of failing."""
 
@@ -90,6 +95,7 @@ class Draft:
     new_category: str | None = None  # created on commit
     guessed: bool = False  # category taken from past entries with the same note
     repay: dict[str, Decimal] | None = None  # 還: principal, interest, owed (before)
+    bill: dict[str, Any] | None = None  # 還 @卡 without an amount: statement date, owed, paid since, due
     dca: Decimal | None = None  # 定額: the fixed amount the buy was sized from
 
     @property
@@ -289,11 +295,83 @@ class Ledger:
                 raise EntryError("年期要大於 0")
             if acc.term_years and acc.grace_years and acc.grace_years >= acc.term_years:
                 raise EntryError("寬限期要比年期短")
+        elif type_ == "credit":
+            acc.statement_day = _optional_day(data.get("statement_day"), "結帳日")
+            acc.pay_day = _optional_day(data.get("pay_day"), "扣款日")
+        autopay = str(data.get("autopay") or "").strip() if type_ == "credit" else ""
+        if autopay and (acc.statement_day is None or acc.pay_day is None):
+            raise EntryError("自動扣繳要先填結帳日和扣款日")
         rules = self._renamed_rules({acc.id: name}) if acc.id is not None else []
         saved = repo.save_account(self.db, acc)
         for r in rules:  # rules naming the old @帳戶 keep working
             repo.save_recurring(self.db, r)
+        if type_ == "credit":
+            acc.id = saved
+            self._save_autopay(acc, autopay)
         return saved
+
+    # ── 信用卡自動扣繳: one monthly 還 @卡 @付款帳戶 rule per card ──
+
+    def _autopay_rule(self, card: Account) -> tuple[Recurring, str] | None:
+        """The card's autopay rule and its paying account's name."""
+        for r in repo.list_recurring(self.db):
+            try:
+                cmd = parse(r.line, self.today())
+            except ParseError:
+                continue
+            if cmd.action != "repay" or cmd.amount is not None:
+                continue
+            names = [n for n in (cmd.account, cmd.to_account) if n]
+            try:
+                accs = [self._pick_account(Command("expense"), None, n) for n in names]
+            except EntryError:
+                continue
+            if any(a.id == card.id for a in accs):
+                payer = next((a.name for a in accs if a.id != card.id), "")
+                return r, payer
+        return None
+
+    def autopay_accounts(self) -> dict[int, str]:
+        """{card id: paying account} for the cards with an autopay rule."""
+        out = {}
+        for a in repo.list_accounts(self.db):
+            if a.type == "credit" and (found := self._autopay_rule(a)):
+                out[a.id or 0] = found[1]
+        return out
+
+    def _next_pay_date(self, card: Account) -> str:
+        """The first 扣款日 after today: the bill already due today or earlier is not the rule's to pay."""
+        assert card.pay_day is not None
+        today = self.today()
+        y, m = today.year, today.month
+        while True:
+            d = Date(y, m, min(card.pay_day, calendar.monthrange(y, m)[1]))
+            if d > today:
+                return d.isoformat()
+            y, m = (y, m + 1) if m < 12 else (y + 1, 1)
+
+    def _save_autopay(self, card: Account, payer: str) -> None:
+        """Create, update or remove the card's autopay rule to match the account form."""
+        found = self._autopay_rule(card)
+        if not payer:
+            if found:
+                repo.delete_recurring(self.db, found[0].id or 0)
+            return
+        line = recurring._plain_line(self, format_command("repay", account=card.name, to_account=payer, note="卡費 自動扣繳"))
+        if found is None:
+            repo.save_recurring(self.db, Recurring(None, line, "monthly", self._next_pay_date(card)))
+            return
+        rule = found[0]
+        moved = Date.fromisoformat(rule.start_date).day != card.pay_day
+        if rule.line == line and not moved:
+            return
+        _, sep, note = rule.line.partition("#")
+        rule.line = recurring._plain_line(self, format_command("repay", account=card.name, to_account=payer,
+                                                              note=note.strip() if sep else "卡費 自動扣繳"))  # fmt: skip
+        if moved:
+            rule.start_date = self._next_pay_date(card)
+        rule.error = None
+        repo.save_recurring(self.db, rule)
 
     def delete_account(self, account_id: int) -> None:
         if repo.account_tx_count(self.db, account_id):
@@ -636,11 +714,14 @@ class Ledger:
     def _build_repay(self, cmd: Command, day: str, skip: set[int]) -> Draft:
         names = [n for n in (cmd.account, cmd.to_account) if n]
         if not names:
-            raise EntryError("還款要寫貸款帳戶：還 @房貸")
+            raise EntryError("還款要寫貸款或信用卡帳戶：還 @房貸、還 @玉山")
         accs = [self._pick_account(cmd, None, n) for n in names]
+        cards = [a for a in accs if a.type == "credit"]
         loans = [a for a in accs if a.type == "loan"]
+        if cards and not loans:
+            return self._build_card_payment(cmd, day, skip, accs, cards)
         if len(loans) != 1:
-            raise EntryError("兩個都是貸款帳戶" if loans else "還款要指定一個貸款帳戶（帳戶類型「貸款」）")
+            raise EntryError("兩個都是貸款帳戶" if loans else "還款要指定一個貸款帳戶或信用卡")
         loan = loans[0]
         payer = next((a for a in accs if a is not loan), None) or self._pick_account(Command("expense"), None)
         if payer.type == "loan":
@@ -671,6 +752,56 @@ class Ledger:
             txs, payer, to_account=loan, category=cat_name, new_category=None if cat or not interest else cat_name,
             repay={"principal": principal, "interest": interest, "owed": owed},
         )
+
+    # ── credit cards ──
+
+    @staticmethod
+    def _statement_date(card: Account, day: str) -> str:
+        """The last 結帳日 before `day` (a 31st falls on a shorter month's last day)."""
+        assert card.statement_day is not None
+        d = Date.fromisoformat(day)
+        y, m = d.year, d.month
+        while True:
+            closing = Date(y, m, min(card.statement_day, calendar.monthrange(y, m)[1]))
+            if closing < d:
+                return closing.isoformat()
+            y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+
+    def _card_due(self, card: Account, day: str, skip: set[int]) -> dict[str, Any]:
+        """The bill paid on `day`: what was owed on the last 結帳日, less what was paid in (or refunded) since."""
+        statement = self._statement_date(card, day)
+        rows = [t for t in repo.list_txs(self.db) if t.account_id == card.id and t.date <= day and t.id not in skip]
+        owed = max(-sum((t.amount for t in rows if t.date <= statement), ZERO), ZERO)
+        paid = sum((t.amount for t in rows if t.date > statement and t.amount > 0), ZERO)
+        return {"statement": statement, "owed": owed, "paid": paid, "due": max(owed - paid, ZERO)}
+
+    def _build_card_payment(self, cmd: Command, day: str, skip: set[int], accs: list[Account], cards: list[Account]) -> Draft:
+        """還 @卡 @銀行: pays the bill (or the amount written) as a transfer into the card."""
+        if len(cards) != 1:
+            raise EntryError("兩個都是信用卡帳戶")
+        card = cards[0]
+        payer = next((a for a in accs if a is not card), None) or self._pick_account(Command("expense"), None)
+        if payer.type in ("credit", "loan"):
+            raise EntryError("付款帳戶不能是信用卡或貸款帳戶")
+        if payer.currency != card.currency:
+            raise EntryError(f"付款帳戶「{payer.name}」和信用卡的幣別不同")
+        if cmd.interest is not None:
+            raise EntryError("信用卡繳費不用寫「利」")
+        bill = None
+        if cmd.amount is not None:
+            amount = cmd.amount
+        elif card.statement_day is None:
+            raise EntryError(f"「{card.name}」沒有設定結帳日，請寫金額：還 3000 @{card.name}")
+        else:
+            bill = self._card_due(card, day, skip)
+            amount = bill["due"]
+            if amount <= 0:
+                raise NothingDue("這期帳單已經繳清")
+        rate = self._rate(payer, day, None)
+        group = uuid.uuid4().hex
+        txs = [Tx(None, payer.id or 0, day, "transfer", amount=-amount, fx_rate=rate, transfer_group=group, note=cmd.note),
+               Tx(None, card.id or 0, day, "transfer", amount=amount, fx_rate=rate, transfer_group=group, note=cmd.note)]  # fmt: skip
+        return Draft(txs, payer, to_account=card, bill=bill)
 
     def _build_trade(self, cmd: Command, day: str, keep_id: int | None) -> Draft:
         sec = self.resolve_security(cmd.symbol) if cmd.symbol else None
@@ -836,6 +967,8 @@ class Ledger:
             assert cmd.amount is not None
             return {"status": "ready", "title": f"定期定額 {sec_title or cmd.symbol}", "parts": [str(e)],
                     "total": fmt.money(-cmd.amount, signed=True), "currency": "TWD", "sign": -1}  # fmt: skip
+        except NothingDue as e:  # still a valid line, e.g. for an autopay rule
+            return {"status": "error", "message": str(e), "settled": True}
         except EntryError as e:
             return {"status": "error", "message": str(e)}
         return {"status": "ready", **self._describe(draft), "guessed_category": draft.category if draft.guessed else None}
@@ -854,6 +987,18 @@ class Ledger:
             total = r["principal"] + r["interest"]
             return {"title": f"還款 {d.to_account.name}", "parts": parts, "total": fmt.money(-total, cur, signed=True),
                     "currency": cur, "sign": -1}  # fmt: skip
+        if t.kind == "transfer" and d.to_account is not None and d.to_account.type == "credit" and d.txs[1].account_id == d.to_account.id:
+            if (b := d.bill) is not None:
+                parts.append(f"{b['statement'][5:].replace('-', '/')} 帳單 {fmt.money(b['owed'], cur)}")
+                if b["paid"]:
+                    parts.append(f"已繳 −{fmt.money(b['paid'], cur)}")
+            parts.append(d.account.name)
+            if t.date != self.today().isoformat():
+                parts.append(t.date)
+            if t.note:
+                parts.append(t.note)
+            return {"title": f"繳卡費 {d.to_account.name}", "parts": parts, "total": fmt.money(t.amount, cur, signed=True),
+                    "currency": cur, "sign": -1, "card": True}  # fmt: skip
         if t.kind == "transfer" and d.to_account is not None:
             got = d.txs[1].amount
             title = f"轉帳 {d.account.name} → {d.to_account.name}"
@@ -1517,6 +1662,7 @@ class Ledger:
                 }
             )
 
+        autopay = self.autopay_accounts()
         accounts = [
             {
                 "id": a.id,
@@ -1537,6 +1683,9 @@ class Ledger:
                 "principal": str(a.principal) if a.principal is not None else None,
                 "term_years": str(a.term_years) if a.term_years is not None else None,
                 "grace_years": str(a.grace_years) if a.grace_years is not None else None,
+                "statement_day": a.statement_day,
+                "pay_day": a.pay_day,
+                "autopay": autopay.get(a.id or 0),
                 "archived": a.archived,
                 "color": a.color,
             }
@@ -1921,6 +2070,19 @@ def _optional_positive(v: object, label: str) -> Decimal | None:
     if v is None or str(v).strip() == "":
         return None
     return _positive(v, label, allow_zero=True)
+
+
+def _optional_day(v: object, label: str) -> int | None:
+    """A day of month, 1–31."""
+    if v is None or str(v).strip() == "":
+        return None
+    try:
+        day = int(str(v).strip().removesuffix("號").removesuffix("日"))
+    except ValueError:
+        raise EntryError(f"{label}要填 1 到 31 的數字") from None
+    if not 1 <= day <= 31:
+        raise EntryError(f"{label}要填 1 到 31 的數字")
+    return day
 
 
 def _optional_date(v: object, label: str) -> str | None:

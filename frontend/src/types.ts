@@ -91,6 +91,9 @@ export interface AccountRow {
   principal: string | null; // loans
   term_years: string | null;
   grace_years: string | null;
+  statement_day: number | null; // credit cards: 結帳日, 扣款日 (day of month)
+  pay_day: number | null;
+  autopay: string | null; // the account the card's bill is paid from automatically
   archived: boolean;
   color: string | null; // picked by hand; null = from the bank/broker in the name
 }
@@ -226,6 +229,9 @@ export interface AccountInput {
   principal?: string;
   term_years?: string;
   grace_years?: string;
+  statement_day?: string;
+  pay_day?: string;
+  autopay?: string;
   archived?: boolean;
   color?: string;
 }
