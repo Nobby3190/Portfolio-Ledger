@@ -1,114 +1,84 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useId } from 'react';
 import { BRANDS, type BrandSlug, brandOf } from './brands';
 
-/** Hand-drawn line icons for account types and income/expense categories (DESIGN.md 2「圖示」).
- *  24×24, stroked in currentColor so they follow the theme tokens. */
+/** Hand-drawn icons for account types and income/expense categories (DESIGN.md 2「圖示」).
+ *  24×24, stroked in currentColor so they follow the theme tokens. Geometric since 2026-10-23: flat
+ *  ends, square or 45° corners, octagons for circles, and deliberate breaks between the parts. */
+const F = { fill: 'currentColor', stroke: 'none' } as const; // the small solid parts
+
 const PATHS = {
   candles: (
     <>
-      <path d="M7 3v4M7 15v4M17 6v5M17 18v3" />
-      <rect x="5" y="7" width="4" height="8" rx="1" />
-      <rect x="15" y="11" width="4" height="7" rx="1" />
+      <path d="M7 3v3M7 16v4M17 5v4M17 18.5v2.5" />
+      <rect x="5.25" y="7.5" width="3.5" height="7" {...F} />
+      <rect x="15.25" y="10.5" width="3.5" height="6.5" {...F} />
     </>
   ),
-  globe: (
-    <>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z" />
-    </>
-  ),
-  bank: <path d="M3 9.5 12 4l9 5.5M5.5 10.5v7M10 10.5v7M14 10.5v7M18.5 10.5v7M3 20h18" />,
+  globe: <path d="M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3zM3 12h18M12 3 8.5 6.5v11L12 21M12 3l3.5 3.5v11L12 21" />,
+  bank: <path d="M5 10l7-7 7 7M3 10h18M7 12.5v5M12 12.5v5M17 12.5v5M3 20h18" />,
   cash: (
-    <>
-      <rect x="2.5" y="6" width="19" height="12" rx="2" />
-      <circle cx="12" cy="12" r="2.6" />
-      <path d="M6 9.5v5M18 9.5v5" />
-    </>
+    <path d="M4.5 6h15l2 2v8l-2 2h-15l-2-2V8zM10.9 9.4h2.2l1.5 1.5v2.2l-1.5 1.5h-2.2l-1.5-1.5v-2.2zM6 10v4M18 10v4" />
   ),
-  card: (
-    <>
-      <rect x="2.5" y="5" width="19" height="14" rx="2" />
-      <path d="M2.5 10h19M6 15h4" />
-    </>
-  ),
-  hourglass: <path d="M6 3h12M6 21h12M7.5 3v2.5L12 12l4.5-6.5V3M7.5 21v-2.5L12 12l4.5 6.5V21" />,
+  card: <path d="M4.5 5h15l2 2v10l-2 2h-15l-2-2V7zM2.5 10h19M6 15h4" />,
+  hourglass: <path d="M6 3h12M6 21h12M7.5 5.5h9L12 10zM7.5 18.5h9L12 14z" />,
   loan: (
     <>
-      <path d="M3.5 11 12 4l8.5 7M6 9.5V20h12V9.5M14.5 12l-5 5" />
-      <circle cx="10" cy="12.5" r="0.9" />
-      <circle cx="14" cy="16.5" r="0.9" />
+      <path d="M4.5 11.5 12 4l7.5 7.5M6.5 13v7.5h11V13M14.5 12.5l-5 5" />
+      <rect x="8.6" y="11.6" width="1.8" height="1.8" {...F} />
+      <rect x="13.6" y="16.6" width="1.8" height="1.8" {...F} />
     </>
   ),
-  house: <path d="M3.5 11 12 4l8.5 7M6 9.5V20h12V9.5M10 20v-5h4v5" />,
-  bowl: <path d="M3.5 12h17a8.5 7 0 0 1-17 0zM9 20.5h6M13 9.5l2.5-6.5M15 9.5l5-5" />,
+  house: <path d="M4.5 11.5 12 4l7.5 7.5M6.5 13v7.5h11V13M10 20.5v-5h4v5" />,
+  bowl: <path d="M3.5 11.5h17L16 16H8zM9.5 19.5h5M10 9l5-5M17 9l3-3" />,
   bus: (
     <>
-      <rect x="5" y="3" width="14" height="15" rx="2.5" />
-      <path d="M5 11h14M8 18v2.5M16 18v2.5" />
-      <circle cx="8.5" cy="14.5" r="0.8" />
-      <circle cx="15.5" cy="14.5" r="0.8" />
+      <path d="M7 3h10l2 2v13H5V5zM5 10.5h14M7.5 18v3M16.5 18v3" />
+      <rect x="7.1" y="13.1" width="1.8" height="1.8" {...F} />
+      <rect x="15.1" y="13.1" width="1.8" height="1.8" {...F} />
     </>
   ),
-  bag: <path d="M5 8h14l-1 12.5H6L5 8zM9 8V6.5a3 3 0 0 1 6 0V8" />,
-  ticket: <path d="M3 7h18v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4V7zM14 7v2M14 11v2M14 15v2" />,
-  medical: <path d="M9.5 3.5h5v6h6v5h-6v6h-5v-6h-6v-5h6z" />,
-  book: <path d="M12 6.5C10.5 5 8 4.5 3.5 4.5v14c4.5 0 7 .5 8.5 2 1.5-1.5 4-2 8.5-2v-14c-4.5 0-7 .5-8.5 2zM12 6.5v14" />,
-  shield: <path d="M12 3 5 6v5.5c0 4.5 3 7.8 7 9.5 4-1.7 7-5 7-9.5V6l-7-3zM9 12l2 2 4-4" />,
+  bag: <path d="M5 8h14v10.5l-2 2H7l-2-2zM9 8V4.5h6V8" />,
+  ticket: <path d="M3 6.5h18V10l-2 2 2 2v3.5H3V14l2-2-2-2zM14.5 9v1.5M14.5 13.5V15" />,
+  medical: <path d="M9.5 7V3.5h5V7M9.5 17v3.5h5V17M7 9.5H3.5v5H7M17 9.5h3.5v5H17" />,
+  book: <path d="M12 7.5 9.5 5h-6v13h6l2.5 2.5M12 7.5 14.5 5h6v13h-6L12 20.5M12 10.5v7" />,
+  shield: <path d="M5 4.5h14v8l-7 7-7-7zM9 11.5l2 2 4-4" />,
   percent: (
     <>
-      <path d="M18 6 6 18" />
-      <circle cx="7.5" cy="7.5" r="2.5" />
-      <circle cx="16.5" cy="16.5" r="2.5" />
+      <path d="M17.5 6.5l-11 11" />
+      <rect x="4.5" y="4.5" width="3.5" height="3.5" {...F} />
+      <rect x="16" y="16" width="3.5" height="3.5" {...F} />
     </>
   ),
-  briefcase: (
-    <>
-      <rect x="3" y="7" width="18" height="13" rx="2" />
-      <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M3 12.5h18" />
-    </>
-  ),
-  gift: (
-    <>
-      <rect x="4" y="10" width="16" height="10.5" rx="1" />
-      <path d="M3 7h18v3H3zM12 7v13.5M12 7c-1.5-3.5-5.5-3.5-5.5-1.5S9.5 7 12 7zm0 0c1.5-3.5 5.5-3.5 5.5-1.5S14.5 7 12 7z" />
-    </>
-  ),
+  briefcase: <path d="M5 7h14l2 2v9.5l-2 2H5l-2-2V9zM9 7V4h6v3M3 13h6.5M14.5 13H21" />,
+  gift: <path d="M3 7.5h18V11H3zM4.5 11v9.5h15V11M12 7.5v13M12 7.5 8.5 4v3.5zM12 7.5 15.5 4v3.5z" />,
   coin: (
-    <>
-      <circle cx="12" cy="12" r="8.5" />
-      <path d="M14.5 9.2c-.5-.8-1.4-1.2-2.5-1.2-1.4 0-2.5.8-2.5 2s1.1 1.6 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1.1 0-2-.4-2.5-1.2M12 6.5V8M12 16v1.5" />
-    </>
+    <path d="M8.5 3.5h7l5 5v7l-5 5h-7l-5-5v-7zM10 10h4v4h-4z" />
   ),
-  transfer: <path d="M4 8h15M15 4l4 4-4 4M20 16H5M9 12l-4 4 4 4" />,
-  check: <path d="M5 12.5 10 17.5 19 7" />,
+  transfer: <path d="M4 8h14M14.5 4.5 18 8l-3.5 3.5M20 16H6M9.5 12.5 6 16l3.5 3.5" />,
+  check: <path d="M4.5 12l5 5L19.5 7" />,
   report: (
     <>
-      <rect x="5" y="4.5" width="14" height="16.5" rx="2" />
-      <path d="M9 3h6v3H9zM8.5 11h7M8.5 14.5h7M8.5 18h4" />
+      <path d="M8 5H5v16h14V5h-3M8.5 11.5h7M8.5 15h7M8.5 18.5h4" />
+      <rect x="9.5" y="3" width="5" height="3.5" {...F} />
     </>
   ),
-  bell: <path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15l1.5-2zM10 21h4" />,
+  bell: <path d="M6 17v-7l3-3h6l3 3v7M4.5 17h15M10.5 20.5h3M12 3.5v2" />,
   dots: (
-    <g fill="currentColor" stroke="none">
-      <circle cx="6" cy="12" r="1.5" />
-      <circle cx="12" cy="12" r="1.5" />
-      <circle cx="18" cy="12" r="1.5" />
+    <g {...F}>
+      <path d="M6 10.25 7.75 12 6 13.75 4.25 12z" />
+      <path d="M12 10.25 13.75 12 12 13.75 10.25 12z" />
+      <path d="M18 10.25 19.75 12 18 13.75 16.25 12z" />
     </g>
   ),
   tag: (
     <>
-      <path d="M3.5 12.5v-8a1 1 0 0 1 1-1h8l8 8-9 9-8-8z" />
-      <circle cx="8" cy="8" r="1.4" />
+      <path d="M3.5 12.5v-9h9l8 8-9 9z" />
+      <rect x="6.5" y="6.5" width="2.5" height="2.5" {...F} />
     </>
   ),
-  chart: <path d="M4 19.5h16M6 15l4-4 3 3 5-6.5" />,
-  wallet: (
-    <>
-      <rect x="3" y="7" width="18" height="12.5" rx="2.5" />
-      <path d="M16 13.2h2M5 7l9-3.2 2 3.2" />
-    </>
-  ),
-  flag: <path d="M6 21V4M6 4h11.5l-2.2 4 2.2 4H6" />,
+  chart: <path d="M3.5 20h17M5 16.5 9.5 12l2.5 2.5M14 12.5l5-5" />,
+  wallet: <path d="M5 7h14l2 2v9l-2 2H5l-2-2V9zM6 7l3-3h7v3M15 11.5h3.5V15H15z" />,
+  flag: <path d="M6 21V3.5M8.5 4.5h10l-3 3 3 3h-10" />,
 } satisfies Record<string, ReactNode>;
 
 /** A line icon, or a brand logo (`brand:netflix`, from brands.ts). */
@@ -132,12 +102,35 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      // Thin strokes vanish at chip size; a touch heavier there keeps the weight even.
+      strokeWidth={size <= 14 ? 2.5 : 2.25}
+      strokeLinecap="butt"
+      strokeLinejoin="miter"
+      strokeMiterlimit={4}
       aria-hidden
     >
       {PATHS[name as keyof typeof PATHS]}
+    </svg>
+  );
+}
+
+/** The app's mark (the Dock icon, packaging/make_icon.py, draws it on a tile): three ledger lines and a
+ *  tick, no tile around it here (2026-10-23), in an indigo-to-violet gradient that follows the theme. */
+export function BrandMark() {
+  const id = useId();
+  return (
+    <svg className="brand-mark" viewBox="5 5 16 16" aria-hidden>
+      <defs>
+        {/* user space: on a horizontal line a bounding-box gradient has no height and draws nothing */}
+        <linearGradient id={id} gradientUnits="userSpaceOnUse" x1="5" y1="5" x2="21" y2="21">
+          <stop offset="0" style={{ stopColor: 'var(--logo-a)' }} />
+          <stop offset="1" style={{ stopColor: 'var(--logo-b)' }} />
+        </linearGradient>
+      </defs>
+      <g fill="none" stroke={`url(#${id})`} strokeWidth="2.6">
+        <path d="M6 7h14M6 19h14" />
+        <path d="M6 13h9M18 10v6" opacity="0.6" />
+      </g>
     </svg>
   );
 }

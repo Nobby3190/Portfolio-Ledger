@@ -373,25 +373,6 @@ export interface MonthPoint {
   future: boolean;
 }
 
-export interface Goal {
-  id: number;
-  name: string;
-  target: string;
-  target_raw: string;
-  deadline: string | null;
-  account_ids: number[];
-  accounts: string[];
-  scope: 'cash' | 'cash_deposit' | 'total' | 'accounts';
-  scope_label: string;
-  current: string;
-  ratio: number;
-  left: string | null;
-  done: boolean;
-  months_left: number | null;
-  per_month: string | null;
-  overdue: boolean;
-}
-
 export interface PlanParams {
   current: string;
   monthly: string;
@@ -414,9 +395,13 @@ export interface LifePlanInput {
   grace_years: string;
   monthly_cost: string;
   rent_saved: string;
-  account_ids: number[];
+  scope: PlanScope;
+  account_ids: number[]; // used when scope is 'accounts'
   active: boolean;
 }
+
+/** What a goal counts as saved (DESIGN.md 規劃視圖「追蹤範圍」); 'total' shares the net worth with the other plans. */
+export type PlanScope = 'cash' | 'cash_deposit' | 'total' | 'accounts';
 
 export interface LifePlan {
   id: number;
@@ -434,6 +419,7 @@ export interface LifePlan {
   left: string | null;
   months_left: number | null;
   per_month: string | null;
+  overdue: boolean;
   loan: {
     principal: string;
     payment: string;
@@ -445,6 +431,8 @@ export interface LifePlan {
   extra_monthly: string | null;
   burden: number | null;
   burden_level: AdviceLevel | null;
+  scope: PlanScope;
+  scope_label: string;
   account_ids: number[];
   accounts: string[];
   input: LifePlanInput;
@@ -560,7 +548,6 @@ export interface Dividends {
 }
 
 export interface Plan {
-  goals: Goal[];
   life_plans: LifePlan[];
   rebalance: {
     label: string;
@@ -595,21 +582,6 @@ export interface Plan {
       marks: { name: string; year: number }[];
     } | null;
   };
-}
-
-export interface BacktestResult {
-  symbol: string;
-  name: string;
-  currency: string;
-  from: string;
-  months: number;
-  invested: string;
-  value: string;
-  gain: string;
-  gain_sign: Sign;
-  return_pct: string | null;
-  xirr: string | null;
-  series: { month: string; invested: number; value: number }[];
 }
 
 export type ComposerKind = 'expense' | 'income' | 'transfer' | 'buy' | 'sell' | 'cash_dividend' | 'more';

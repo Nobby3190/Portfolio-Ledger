@@ -67,19 +67,8 @@ class Category:
     parent_id: int | None = None  # 子類別: the category it rolls up into (one level only)
 
 
-@dataclass
-class Goal:
-    id: int | None
-    name: str
-    target: Decimal
-    deadline: str | None = None
-    account_ids: list[int] | None = None  # used when scope is "accounts"
-    sort: int = 0
-    scope: str = "total"  # a key of GOAL_SCOPES
-
-
-# What a savings goal counts (DESIGN.md 規劃視圖「追蹤範圍」).
-GOAL_SCOPES = {"cash": "現金與活存", "cash_deposit": "現金＋定存", "total": "總資產", "accounts": "自訂帳戶"}
+# What a goal or plan counts as saved so far (DESIGN.md 規劃視圖「追蹤範圍」).
+PLAN_SCOPES = {"cash": "現金與活存", "cash_deposit": "現金＋定存", "total": "總資產", "accounts": "自訂帳戶"}
 
 
 LIFE_PLAN_KINDS = {"house": "買房", "car": "買車", "other": "其他大筆支出"}
@@ -99,9 +88,10 @@ class LifePlan:
     grace_years: Decimal | None = None
     monthly_cost: Decimal | None = None
     rent_saved: Decimal | None = None
-    account_ids: list[int] | None = None  # None/empty: the whole net worth
-    active: bool = True
+    account_ids: list[int] | None = None  # used when scope is "accounts"
+    active: bool = True  # included in the projection and health check
     sort: int = 0
+    scope: str = "total"  # a key of PLAN_SCOPES; "total" shares the net worth with the other plans
 
 
 @dataclass

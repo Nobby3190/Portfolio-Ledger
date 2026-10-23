@@ -1,19 +1,16 @@
-"""收支 (monthly income/expense, budgets), 規劃 (life plans, goals, rebalancing, FIRE, DCA backtest) and 健檢."""
+"""收支 (monthly income/expense, budgets), 規劃 (life plans, goals, rebalancing, FIRE) and 健檢."""
 
 from __future__ import annotations
 
 import calendar
 import json
 import unicodedata
-from datetime import UTC, datetime
 from datetime import date as Date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from .. import repo
-from ..models import GOAL_SCOPES, LIFE_PLAN_KINDS, Category, Goal, LifePlan, Tx
-from ..providers import yahoo
-from ..providers.base import ProviderError
+from ..models import LIFE_PLAN_KINDS, PLAN_SCOPES, Category, LifePlan, Tx
 from . import advisor, dividends, fmt, planner, quick
 
 if TYPE_CHECKING:
@@ -420,10 +417,8 @@ def _recent_averages(lg: Ledger) -> tuple[Decimal, Decimal, int]:
     return a["net"] or ZERO, (a["spend"] or ZERO) * 12, a["months12"]
 
 
-def _goal_current(v: dict[str, Any], scope: str, ids: list[int]) -> Decimal:
-    """What a savings goal has so far, by its 追蹤範圍."""
-    if scope == "total":
-        return v["total"]
+def _scope_saved(v: dict[str, Any], scope: str, ids: list[int]) -> Decimal:
+    """What a goal has so far by its 追蹤範圍, for every scope but the shared "total"."""
     if scope == "accounts":
         return sum((v["acc_value_twd"].get(i, ZERO) for i in ids), ZERO)
     # cash / cash_deposit: TWD bank and cash balances plus the TWD cash in broker accounts (never the stocks).
@@ -441,35 +436,7 @@ def _goal_current(v: dict[str, Any], scope: str, ids: list[int]) -> Decimal:
 def plan(lg: Ledger) -> dict[str, Any]:
     v = lg._valuation()
     total: Decimal = v["total"]
-    today = lg.today()
     accounts = {a.id: a for a, _, _ in v["accounts"]}
-
-    goals = []
-    for g in repo.list_goals(lg.db):
-        ids = [i for i in g.account_ids or [] if i in accounts]
-        current = _goal_current(v, g.scope, ids)
-        left = g.target - current
-        months = planner.months_between(today, Date.fromisoformat(g.deadline)) if g.deadline else None
-        goals.append(
-            {
-                "id": g.id,
-                "name": g.name,
-                "target": fmt.money(g.target),
-                "target_raw": f"{g.target.normalize():f}",
-                "deadline": g.deadline,
-                "account_ids": ids,
-                "accounts": [accounts[i].name for i in ids],
-                "scope": g.scope,
-                "scope_label": GOAL_SCOPES.get(g.scope, g.scope),
-                "current": fmt.money(current),
-                "ratio": float(current / g.target) if g.target else 0.0,
-                "left": fmt.money(left) if left > 0 else None,
-                "done": left <= 0,
-                "months_left": months,
-                "per_month": fmt.money(left / months) if left > 0 and months else None,
-                "overdue": bool(g.deadline and g.deadline < today.isoformat() and left > 0),
-            }
-        )
 
     targets = _targets(lg)
     classes = {k: float(x) for k, x in v["classes"].items()}
@@ -488,14 +455,13 @@ def plan(lg: Ledger) -> dict[str, Any]:
     ]
 
     income = _averages(lg)["income"]
-    # Plans without their own accounts share what the others have not claimed, earliest first,
+    # Plans counting the net worth share what the account plans have not claimed, earliest first,
     # so nothing is counted twice.
     rows = repo.list_life_plans(lg.db)
-    claimed = {i for p in rows for i in p.account_ids or [] if i in accounts}
+    claimed = {i for p in rows if p.scope == "accounts" for i in p.account_ids or [] if i in accounts}
     pool = [total - sum((v["acc_value_twd"].get(i, ZERO) for i in claimed), ZERO)]
     plans = [_life_plan(lg, p, v, pool, income) for p in rows]
     return {
-        "goals": goals,
         "rebalance": rebalance,
         "life_plans": [p for p, _ in plans],
         "fire": _fire(lg, total, [(p["name"], e) for p, e in plans if e is not None]),
@@ -533,9 +499,9 @@ def _life_plan(
     """
     down, loan = _loan(p)
     need = down + float(p.one_off or 0)
-    ids = [i for i in p.account_ids or [] if i in v["acc_by_id"]]
-    if ids:
-        saved = float(sum((v["acc_value_twd"].get(i, ZERO) for i in ids), ZERO))
+    ids = [i for i in p.account_ids or [] if i in v["acc_by_id"]] if p.scope == "accounts" else []
+    if p.scope != "total":
+        saved = float(_scope_saved(v, p.scope, ids))
     else:
         saved = max(0.0, min(float(pool[0]), need))
         pool[0] -= Decimal(str(saved))
@@ -574,6 +540,7 @@ def _life_plan(
         "left": money(left) if left > 0 else None,
         "months_left": months,
         "per_month": money(left / months) if left > 0 and months else None,
+        "overdue": left > 0 and months == 0,
         "loan": None
         if loan is None
         else {
@@ -587,6 +554,8 @@ def _life_plan(
         "extra_monthly": money(extra, signed=True) if extra else None,
         "burden": burden,
         "burden_level": level,
+        "scope": p.scope,
+        "scope_label": PLAN_SCOPES.get(p.scope, p.scope),
         "account_ids": ids,
         "accounts": [v["acc_by_id"][i].name for i in ids],
         "input": {
@@ -594,7 +563,7 @@ def _life_plan(
             "price": raw(p.price), "down_ratio": raw(p.down_ratio), "one_off": raw(p.one_off),
             "loan_rate": raw(p.loan_rate), "loan_years": raw(p.loan_years), "grace_years": raw(p.grace_years),
             "monthly_cost": raw(p.monthly_cost), "rent_saved": raw(p.rent_saved), "account_ids": ids,
-            "active": p.active,
+            "scope": p.scope, "active": p.active,
         },
     }  # fmt: skip
     month = _plan_month(lg, p)
@@ -609,10 +578,10 @@ def save_life_plan(lg: Ledger, data: dict[str, Any]) -> int:
         raise FinanceError("請選擇計劃類型")
     name = str(data.get("name", "")).strip()
     if not name:
-        raise FinanceError("計劃要有名稱")
-    price = _amount(data.get("price"), "價格")
+        raise FinanceError("要有名稱")
+    price = _amount(data.get("price"), "目標金額")
     if not price:
-        raise FinanceError("價格要大於 0")
+        raise FinanceError("目標金額要大於 0")
     month = str(data.get("target_month") or "").strip() or None
     if month:
         try:
@@ -631,12 +600,19 @@ def save_life_plan(lg: Ledger, data: dict[str, Any]) -> int:
     rate = _amount(data.get("loan_rate"), "貸款利率")
     if rate is None and str(data.get("loan_rate") or "").strip():
         rate = ZERO
+    ids = [int(i) for i in data.get("account_ids") or []]
+    # Callers that send no scope (older ones) meant: ticked accounts, else the shared net worth.
+    scope = str(data.get("scope") or ("accounts" if ids else "total"))
+    if scope not in PLAN_SCOPES:
+        raise FinanceError("請選擇追蹤範圍")
+    if scope == "accounts" and not ids:
+        raise FinanceError("自訂帳戶要勾選至少一個帳戶")
     pid = data.get("id")
     plan = LifePlan(
         int(pid) if pid is not None else None, kind, name, price, month, down,
         _amount(data.get("one_off"), "一次性費用"), rate, years, grace,
         _amount(data.get("monthly_cost"), "每月持有成本"), _amount(data.get("rent_saved"), "省下的房租"),
-        [int(i) for i in data.get("account_ids") or []], bool(data.get("active", True)),
+        ids if scope == "accounts" else [], bool(data.get("active", True)), scope=scope,
     )  # fmt: skip
     return repo.save_life_plan(lg.db, plan)
 
@@ -889,77 +865,3 @@ def _fire(lg: Ledger, total: Decimal, events: list[tuple[str, planner.PlanEvent]
 
 def _auto_strings(auto: dict[str, float]) -> dict[str, str]:
     return {k: str(round(x)) for k, x in auto.items()}
-
-
-def save_goal(lg: Ledger, data: dict[str, Any]) -> int:
-    name = str(data.get("name", "")).strip()
-    if not name:
-        raise FinanceError("目標要有名稱")
-    target = _amount(data.get("target"), "目標金額")
-    if not target:
-        raise FinanceError("目標金額要大於 0")
-    deadline = str(data.get("deadline") or "").strip() or None
-    if deadline:
-        try:
-            deadline = Date.fromisoformat(deadline).isoformat()
-        except ValueError:
-            raise FinanceError("期限要是 YYYY-MM-DD 格式") from None
-    ids = [int(i) for i in data.get("account_ids") or []]
-    # Callers that send no scope (older ones) meant: ticked accounts, else the whole net worth.
-    scope = str(data.get("scope") or ("accounts" if ids else "total"))
-    if scope not in GOAL_SCOPES:
-        raise FinanceError("請選擇追蹤範圍")
-    if scope == "accounts" and not ids:
-        raise FinanceError("自訂帳戶要勾選至少一個帳戶")
-    gid = data.get("id")
-    return repo.save_goal(
-        lg.db, Goal(int(gid) if gid is not None else None, name, target, deadline, ids if scope == "accounts" else [], scope=scope)
-    )
-
-
-def delete_goal(lg: Ledger, goal_id: int) -> None:
-    repo.delete_goal(lg.db, goal_id)
-
-
-def backtest(lg: Ledger, symbol: str, start: str, amount: str) -> dict[str, Any]:
-    symbol = symbol.strip().upper()
-    if not symbol:
-        raise FinanceError("請輸入代號")
-    amt = _amount(amount, "每月金額")
-    if not amt:
-        raise FinanceError("每月金額要大於 0")
-    try:
-        begin = datetime.strptime(start.strip()[:7], "%Y-%m").replace(tzinfo=UTC)
-    except ValueError:
-        raise FinanceError("開始月份要是 YYYY-MM") from None
-    if begin.date() > lg.today():
-        raise FinanceError("開始月份不能在未來")
-    try:
-        sec = lg.resolve_security(symbol)
-    except ValueError as e:
-        raise FinanceError(str(e)) from e
-    ysym = f"{symbol}.TW" if sec.market == "TWSE" else f"{symbol}.TWO" if sec.market == "TPEX" else symbol
-    try:
-        prices = yahoo.monthly(lg.client, ysym, begin)
-    except ProviderError as e:
-        raise FinanceError(str(e)) from e
-    if not prices:
-        raise FinanceError(f"{symbol} 在這段期間沒有價格資料")
-    bt = planner.dca([(d, float(p)) for d, p in prices], float(amt), lg.today())
-    gain = bt.value - bt.invested
-    cur = sec.currency
-    return {
-        "symbol": symbol,
-        "name": sec.name,
-        "currency": cur,
-        "from": prices[0][0][:7],
-        "months": len(bt.series),
-        "invested": fmt.money(Decimal(str(bt.invested)), cur),
-        "value": fmt.money(Decimal(str(round(bt.value, 2))), cur),
-        "gain": fmt.money(Decimal(str(round(gain, 2))), cur, signed=True),
-        "gain_sign": 1 if gain > 0 else -1 if gain < 0 else 0,
-        "return_pct": fmt.pct(Decimal(str(gain)), Decimal(str(bt.invested))),
-        # Annualising a few months of returns gives silly numbers; only show it from a year on.
-        "xirr": None if bt.xirr is None or len(bt.series) < 12 else f"{bt.xirr * 100:+.2f}%".replace("-", "−"),
-        "series": [{"month": m, "invested": round(i, 2), "value": round(x, 2)} for m, i, x in bt.series],
-    }

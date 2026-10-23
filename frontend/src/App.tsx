@@ -13,7 +13,8 @@ import { MoneyView } from './components/MoneyView';
 import { AccountsPanel, CategoriesPanel, SettingsPanel } from './components/Panels';
 import { PlanView } from './components/PlanView';
 import { AllocationCard, NetWorthCard } from './components/Summary';
-import { Icon, type IconName } from './lib/icons';
+import { WatchlistCard } from './components/Watchlist';
+import { BrandMark, Icon, type IconName } from './lib/icons';
 import { accountColor } from './lib/institutions';
 import { FreshContext } from './lib/motion';
 import { Money, PrivacyContext } from './lib/privacy';
@@ -216,9 +217,8 @@ export default function App() {
         <div className="shell">
           <aside className="rail">
             <span className="brand" aria-label="帳本 Ledger">
-              <span className="brand-mark" aria-hidden />
-              帳本
-              <span className="brand-en">Ledger</span>
+              <BrandMark />
+              LEDGER
             </span>
             <nav className="rail-nav" aria-label="視圖">
               {VIEWS.map(([v, label, icon], i) => (
@@ -316,6 +316,8 @@ export default function App() {
                   <DividendsTile state={state} />
                   <AllocationCard state={state} />
                 </div>
+                {/* 自選股 sits with the holdings: quotes, notes and 財報 like them (moved from 規劃 2026-10-23) */}
+                <WatchlistCard state={state} />
                 <DividendsCard state={state} />
                 <LoansCard state={state} className="span-12" />
                 {state.deposits.length + state.fx_positions.length > 0 ? (

@@ -1,6 +1,6 @@
 // Typed access to the Python side (pywebview js_api, see src/portfolio_ledger/api.py).
 import type {
-  AccountInput, Advice, Alerts, BacktestResult, Dividends, Fundamentals, Note, NoteInput, WatchRow, GroupInput, LifePlanInput, MonthReport, Plan, PlanParams, Preview, RecurringFreq,
+  AccountInput, Advice, Alerts, Dividends, Fundamentals, Note, NoteInput, WatchRow, GroupInput, LifePlanInput, MonthReport, Plan, PlanParams, Preview, RecurringFreq,
   RecurringInput, RecurringRule, Settings, State, TxFields, YearReport,
 } from './types';
 
@@ -33,8 +33,6 @@ interface PyApi {
   get_plan(): Promise<Res<{ plan: Plan }>>;
   save_plan(values: Partial<PlanParams>): Promise<Res<{ plan: Plan }>>;
   save_targets(values: Record<string, string>): Promise<Res<{ plan: Plan }>>;
-  save_goal(data: GoalInput): Promise<Res<{ plan: Plan }>>;
-  delete_goal(id: number): Promise<Res<{ plan: Plan }>>;
   save_life_plan(data: LifePlanInput): Promise<Res<{ plan: Plan }>>;
   delete_life_plan(id: number): Promise<Res<{ plan: Plan }>>;
   get_advice(): Promise<Res<{ advice: Advice }>>;
@@ -53,7 +51,6 @@ interface PyApi {
   get_alerts(): Promise<Res<{ alerts: Alerts }>>;
   dismiss_alert(key: string): Promise<Res<{ alerts: Alerts }>>;
   save_alert_settings(values: Partial<Record<'day_pct' | 'week_pct' | 'watchlist', string | boolean>>): Promise<Res<{ alerts: Alerts }>>;
-  backtest(symbol: string, start: string, amount: string): Promise<Res<{ result: BacktestResult }>>;
   refresh(): Promise<Res<object>>;
   export_csv(): Promise<Res<{ path: string }>>;
   backup(): Promise<Res<{ path: string }>>;
@@ -68,18 +65,6 @@ declare global {
     ledgerLock?: () => void;
   }
 }
-
-export interface GoalInput {
-  id?: number;
-  name: string;
-  target: string;
-  deadline: string;
-  scope: GoalScope;
-  account_ids: number[]; // used when scope is 'accounts'
-}
-
-/** What a savings goal counts (DESIGN.md 規劃視圖「追蹤範圍」). */
-export type GoalScope = 'cash' | 'cash_deposit' | 'total' | 'accounts';
 
 let ready: Promise<PyApi> | null = null;
 
@@ -121,8 +106,6 @@ export const api = {
   plan: async () => (await py()).get_plan(),
   savePlan: async (values: Partial<PlanParams>) => (await py()).save_plan(values),
   saveTargets: async (values: Record<string, string>) => (await py()).save_targets(values),
-  saveGoal: async (data: GoalInput) => (await py()).save_goal(data),
-  deleteGoal: async (id: number) => (await py()).delete_goal(id),
   saveLifePlan: async (data: LifePlanInput) => (await py()).save_life_plan(data),
   deleteLifePlan: async (id: number) => (await py()).delete_life_plan(id),
   advice: async () => (await py()).get_advice(),
@@ -142,7 +125,6 @@ export const api = {
   dismissAlert: async (key: string) => (await py()).dismiss_alert(key),
   saveAlertSettings: async (values: Partial<Record<'day_pct' | 'week_pct' | 'watchlist', string | boolean>>) =>
     (await py()).save_alert_settings(values),
-  backtest: async (symbol: string, start: string, amount: string) => (await py()).backtest(symbol, start, amount),
   refresh: async () => (await py()).refresh(),
   exportCsv: async () => (await py()).export_csv(),
   backup: async () => (await py()).backup(),

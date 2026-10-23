@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 from .db import Db
-from .models import Account, Category, Goal, LifePlan, Note, Recurring, Security, Tx
+from .models import Account, Category, LifePlan, Note, Recurring, Security, Tx
 
 
 def _d(v: str | None) -> Decimal | None:
@@ -318,7 +318,7 @@ def delete_recurring(db: Db, rule_id: int) -> None:
         c.execute("DELETE FROM recurring WHERE id = ?", (rule_id,))
 
 
-# ── categories & goals ───────────────────────────────────────────────────
+# ── categories ───────────────────────────────────────────────────
 
 
 def _category(r: sqlite3.Row) -> Category:
@@ -368,35 +368,9 @@ def category_use_counts(db: Db) -> dict[int, int]:
     return {r["category_id"]: r["n"] for r in rows}
 
 
-def _goal(r: sqlite3.Row) -> Goal:
-    ids = [int(x) for x in r["account_ids"].split(",") if x]
-    return Goal(r["id"], r["name"], Decimal(r["target"]), r["deadline"], ids, r["sort"], r["scope"])
-
-
-def list_goals(db: Db) -> list[Goal]:
-    return [_goal(r) for r in db.query("SELECT * FROM goals ORDER BY sort, id")]
-
-
-def save_goal(db: Db, g: Goal) -> int:
-    values = (g.name, str(g.target), g.deadline, ",".join(str(i) for i in g.account_ids or []), g.sort, g.scope)
-    with db.write() as c:
-        if g.id is None:
-            cur = c.execute(
-                "INSERT INTO goals (name, target, deadline, account_ids, sort, scope) VALUES (?, ?, ?, ?, ?, ?)", values
-            )
-            return int(cur.lastrowid or 0)
-        c.execute("UPDATE goals SET name=?, target=?, deadline=?, account_ids=?, sort=?, scope=? WHERE id=?", (*values, g.id))
-        return g.id
-
-
-def delete_goal(db: Db, goal_id: int) -> None:
-    with db.write() as c:
-        c.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
-
-
 _PLAN_COLS = (
     "kind", "name", "target_month", "price", "down_ratio", "one_off", "loan_rate", "loan_years",
-    "grace_years", "monthly_cost", "rent_saved", "account_ids", "active", "sort",
+    "grace_years", "monthly_cost", "rent_saved", "account_ids", "active", "sort", "scope",
 )
 
 
@@ -405,7 +379,7 @@ def _life_plan(r: sqlite3.Row) -> LifePlan:
     return LifePlan(
         r["id"], r["kind"], r["name"], Decimal(r["price"]), r["target_month"], _d(r["down_ratio"]),
         _d(r["one_off"]), _d(r["loan_rate"]), _d(r["loan_years"]), _d(r["grace_years"]),
-        _d(r["monthly_cost"]), _d(r["rent_saved"]), ids, bool(r["active"]), r["sort"],
+        _d(r["monthly_cost"]), _d(r["rent_saved"]), ids, bool(r["active"]), r["sort"], r["scope"],
     )
 
 
@@ -417,7 +391,7 @@ def save_life_plan(db: Db, p: LifePlan) -> int:
     values = (
         p.kind, p.name, p.target_month, str(p.price), _s(p.down_ratio), _s(p.one_off), _s(p.loan_rate),
         _s(p.loan_years), _s(p.grace_years), _s(p.monthly_cost), _s(p.rent_saved),
-        ",".join(str(i) for i in p.account_ids or []), int(p.active), p.sort,
+        ",".join(str(i) for i in p.account_ids or []), int(p.active), p.sort, p.scope,
     )
     with db.write() as c:
         if p.id is None:

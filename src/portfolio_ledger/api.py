@@ -206,20 +206,6 @@ class Api:
 
         return _call(run)
 
-    def save_goal(self, data: dict[str, Any]) -> dict[str, Any]:
-        def run() -> dict[str, Any]:
-            finance.save_goal(self._ledger, data)
-            return {"plan": finance.plan(self._ledger)}
-
-        return _call(run)
-
-    def delete_goal(self, goal_id: int) -> dict[str, Any]:
-        def run() -> dict[str, Any]:
-            finance.delete_goal(self._ledger, goal_id)
-            return {"plan": finance.plan(self._ledger)}
-
-        return _call(run)
-
     def save_life_plan(self, data: dict[str, Any]) -> dict[str, Any]:
         def run() -> dict[str, Any]:
             finance.save_life_plan(self._ledger, data)
@@ -331,9 +317,6 @@ class Api:
 
     def get_dividends(self) -> dict[str, Any]:
         return _call(lambda: {"dividends": finance.dividend_report(self._ledger)})
-
-    def backtest(self, symbol: str, start: str, amount: str) -> dict[str, Any]:
-        return _call(lambda: {"result": finance.backtest(self._ledger, symbol, start, amount)})
 
     def refresh(self) -> dict[str, Any]:
         return _call(lambda: self._refresh())

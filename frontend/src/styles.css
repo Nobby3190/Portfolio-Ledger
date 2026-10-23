@@ -4,6 +4,8 @@
    the allocation card gets its own categorical palette (no red/green in it). */
 
 :root {
+  --logo-a: #2d3182; /* BrandMark gradient (2026-10-23) */
+  --logo-b: #5b3fb0;
   --page: #fbf4e9;
   --card: #fffdf8;
   --card-2: #f6ecdd; /* hover, inputs, chips */
@@ -73,6 +75,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --logo-a: #8f9cff;
+    --logo-b: #b79cf0;
     --c-line: #7ab8cc;
     --c-prev: #3a404b;
     --c-tab: #5c7cfa;
@@ -253,33 +257,25 @@ kbd {
   gap: 28px;
 }
 
+/* The wordmark: LEDGER in Orbitron, a wide geometric face, after the user's reference (2026-10-23);
+   no 帳本 beside it. */
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  font-family: var(--num);
-  font-weight: 700;
-  font-size: 18px;
-  letter-spacing: -0.01em;
+  gap: 10px;
+  font-family: 'Orbitron Variable', -apple-system, sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
 }
 
-/* The app icon in miniature: two ledger lines over the allocation band. */
+/* The app's mark (lib/icons.tsx BrandMark), without a tile. */
 .brand-mark {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background:
-    linear-gradient(#eef2f6 0 0) 5px 5px / 12px 2.5px no-repeat,
-    linear-gradient(#aebbc8 0 0) 5px 9.5px / 8px 2.5px no-repeat,
-    linear-gradient(90deg, #c7d4e0 0 55%, #6f8aa3 55% 100%) 5px 14px / 12px 3.5px no-repeat,
-    linear-gradient(160deg, #3a4757, #161b23);
-}
-
-.brand-en {
-  font-weight: 500;
-  color: var(--muted);
-  font-size: 15px;
-  margin-left: -2px;
+  display: block;
+  flex: none;
+  width: 18px;
+  height: 18px;
 }
 
 .views {
@@ -1243,48 +1239,12 @@ button.trow:hover {
 
 /* ── 規劃 ─────────────────────────────────────────────────── */
 
-.goal-t {
-  --cols: minmax(0, 1fr) 170px 110px;
-}
-
 .rebalance-t {
-  --cols: 52px minmax(0, 1fr) 96px 136px;
+  --cols: 48px 84px minmax(0, 1fr);
 }
 
 .pct-input {
   width: 58px;
-}
-
-.share-cell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.share-meter {
-  position: relative;
-  flex: 1;
-  height: 6px;
-  background: var(--rule);
-  border-radius: 3px;
-}
-
-.share-meter > span {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  background: var(--brand);
-  border-radius: 3px;
-}
-
-.share-meter > i {
-  position: absolute;
-  top: -4px;
-  width: 2px;
-  height: 14px;
-  background: var(--gold);
-  transform: translateX(-1px);
 }
 
 .fire-form {
@@ -1294,8 +1254,7 @@ button.trow:hover {
   margin: 6px 0 18px;
 }
 
-.fire-form label,
-.bt-form label {
+.fire-form label {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -1338,28 +1297,6 @@ button.trow:hover {
 
 .answer .strong {
   font-size: 19px;
-}
-
-.bt-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 20px;
-  align-items: flex-end;
-  margin: 6px 0 16px;
-}
-
-.bt-form input {
-  font-size: 16px;
-  border: 0;
-  border-bottom: 1px solid var(--rule);
-  background: none;
-  padding: 3px 0;
-  width: 120px;
-  outline: none;
-}
-
-.bt-form input:focus {
-  border-bottom-color: var(--ink);
 }
 
 .form-row {
@@ -2360,16 +2297,8 @@ button.trow:hover {
   .cat-t {
     --cols: minmax(0, 1fr) 90px 120px;
   }
-  .cat-t .hide-sm,
-  .goal-t .hide-sm,
-  .rebalance-t .hide-sm {
+  .cat-t .hide-sm {
     display: none;
-  }
-  .goal-t {
-    --cols: minmax(0, 1fr) 140px;
-  }
-  .rebalance-t {
-    --cols: 48px minmax(0, 1fr) 90px 120px;
   }
   .deposit-t {
     --cols: minmax(0, 1fr) 130px;
@@ -2714,7 +2643,32 @@ button.trow:hover {
 /* ── 人生計劃 ─────────────────────────────────────────────── */
 
 .life-t {
-  --cols: minmax(0, 1fr) 210px 150px 170px;
+  --cols: minmax(0, 1fr) 160px 110px;
+}
+
+.life-t.with-loan {
+  --cols: minmax(0, 1fr) 150px 100px 110px;
+}
+
+.form .form-label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.plan-details > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.plan-details[open] > summary {
+  margin-bottom: 12px;
+}
+
+.plan-details > .form-row + .form-row {
+  margin-top: 12px;
 }
 
 .inline-form .seg {
@@ -2748,6 +2702,9 @@ button.trow:hover {
     display: none;
   }
   .life-t {
+    --cols: minmax(0, 1fr) 140px;
+  }
+  .life-t.with-loan {
     --cols: minmax(0, 1fr) 140px 120px;
   }
   .life-t .hide-sm {
@@ -3430,18 +3387,11 @@ body {
 }
 .rail .brand {
   padding: 0 8px;
-  font-size: 20px;
-  font-weight: 800;
+  font-size: 18px;
 }
 .rail .brand-mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background:
-    linear-gradient(#eef2f6 0 0) 6px 6px / 14px 3px no-repeat,
-    linear-gradient(#aebbc8 0 0) 6px 11px / 9px 3px no-repeat,
-    linear-gradient(90deg, #c7d4e0 0 55%, #6f8aa3 55% 100%) 6px 16.5px / 14px 4px no-repeat,
-    linear-gradient(160deg, #3a4757, #161b23);
+  width: 20px;
+  height: 20px;
 }
 .rail-nav {
   display: grid;
@@ -3655,7 +3605,6 @@ body {
   }
 }
 @media (max-width: 560px) {
-  .rail .brand-en,
   .rail-label {
     display: none;
   }
@@ -3678,8 +3627,7 @@ body {
 .card[aria-labelledby='rb-h'] {
   --a: var(--hue-indigo);
 }
-.card[aria-labelledby='div-h'],
-.card[aria-labelledby='goals-h'] {
+.card[aria-labelledby='div-h'] {
   --a: var(--hue-teal);
 }
 .card[aria-labelledby='dfx-h'],
@@ -3687,8 +3635,7 @@ body {
 .card[aria-labelledby='fire-h'] {
   --a: var(--hue-sky);
 }
-.card[aria-labelledby='watch-h'],
-.card[aria-labelledby='bt-h'] {
+.card[aria-labelledby='watch-h'] {
   --a: var(--hue-plum);
 }
 .card[aria-labelledby='cat-h'],
@@ -3700,12 +3647,10 @@ body {
 .card[aria-labelledby='loan-h'],
 .card[aria-labelledby='rb-h'],
 .card[aria-labelledby='div-h'],
-.card[aria-labelledby='goals-h'],
 .card[aria-labelledby='dfx-h'],
 .card[aria-labelledby='soon-h'],
 .card[aria-labelledby='fire-h'],
 .card[aria-labelledby='watch-h'],
-.card[aria-labelledby='bt-h'],
 .card[aria-labelledby='cat-h'],
 .card[aria-labelledby='ycat-h'],
 .card[aria-labelledby='life-h'] {
@@ -3750,22 +3695,6 @@ body {
 .budget-line span {
   border-radius: 5px;
 }
-.share-meter {
-  height: 8px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--a, var(--brand)) 15%, var(--card-2));
-}
-.share-meter > span {
-  border-radius: 4px;
-  background: var(--a, var(--brand));
-}
-.share-meter > i {
-  width: 3px;
-  height: 16px;
-  border-radius: 2px;
-  background: var(--ink);
-}
-
 /* ── the total: bigger, with the allocation along its bottom ── */
 .card.hero {
   border-radius: 26px;
@@ -4003,68 +3932,6 @@ body {
 }
 
 /* ── 規劃 ── */
-.goal-rings {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 12px;
-}
-.goal-ring {
-  display: grid;
-  justify-items: center;
-  gap: 3px;
-  text-align: center;
-  min-width: 0;
-  padding: 14px 10px;
-  border: 1px solid transparent;
-  border-radius: 18px;
-  background: none;
-  cursor: pointer;
-}
-.goal-ring:hover {
-  background: var(--card-2);
-}
-.goal-ring .sub {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--muted);
-  max-width: 100%;
-}
-.goal-ring .sub.warn {
-  color: var(--warn);
-}
-.goal-name {
-  font-weight: 700;
-  max-width: 100%;
-  margin-top: 4px;
-}
-.ring {
-  position: relative;
-  width: 104px;
-  height: 104px;
-}
-.ring svg {
-  width: 100%;
-  height: 100%;
-}
-.ring circle {
-  fill: none;
-  stroke-width: 11;
-}
-.ring .track {
-  stroke: var(--card-2);
-}
-.ring .fill {
-  stroke: var(--t);
-  stroke-linecap: round;
-}
-.ring .num {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-size: 21px;
-  font-weight: 800;
-}
 .mix {
   display: grid;
   gap: 8px;

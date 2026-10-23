@@ -1,4 +1,4 @@
-"""Planning maths: FIRE projection (with life-plan events), loans, rebalancing, DCA backtest, XIRR. Pure functions.
+"""Planning maths: FIRE projection (with life-plan events), loans, rebalancing, XIRR. Pure functions.
 
 Projections use floats: they are estimates over decades, not ledger amounts.
 """
@@ -137,32 +137,6 @@ def rebalance(values: dict[str, float], targets: dict[str, float]) -> list[Rebal
     order = list(targets)
     rows.sort(key=lambda r: order.index(r.label) if r.label in order else len(order))
     return rows
-
-
-@dataclass
-class Backtest:
-    invested: float
-    value: float
-    shares: float
-    xirr: float | None
-    series: list[tuple[str, float, float]]  # (YYYY-MM, invested so far, market value)
-
-
-def dca(prices: list[tuple[str, float]], amount: float, today: Date) -> Backtest:
-    """Buy `amount` at each monthly price (oldest first); value at the last price."""
-    shares = invested = 0.0
-    series = []
-    flows: list[tuple[Date, float]] = []
-    for day, price in prices:
-        if price <= 0:
-            continue
-        shares += amount / price
-        invested += amount
-        flows.append((Date.fromisoformat(day), -amount))
-        series.append((day[:7], invested, shares * price))
-    value = shares * prices[-1][1] if prices else 0.0
-    rate = xirr([*flows, (today, value)]) if flows else None
-    return Backtest(invested, value, shares, rate, series)
 
 
 def xirr(flows: list[tuple[Date, float]]) -> float | None:

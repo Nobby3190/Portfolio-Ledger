@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { api } from '../api';
 import { Money } from '../lib/privacy';
-import type { LifePlan, LifePlanInput, Plan, State } from '../types';
+import type { LifePlan, LifePlanInput, Plan, PlanScope, State } from '../types';
+import { HelpTip } from './Panels';
 
 type Take = (r: { ok: true; plan: Plan } | { ok: false; error: string }) => void;
 
 // Nothing is preset: every number starts empty and only what is filled in gets calculated. The user
 // names the plan; there is no house/car type to pick any more (2026-10-13), new plans are 'other'.
+// 儲蓄目標 were merged in (2026-10-23): a goal is a plan without the big-purchase details, kept out of
+// the projection until the user turns it on.
 const EMPTY: LifePlanInput = {
   kind: 'other',
   name: '',
@@ -19,18 +22,29 @@ const EMPTY: LifePlanInput = {
   grace_years: '',
   monthly_cost: '',
   rent_saved: '',
+  scope: 'cash',
   account_ids: [],
-  active: true,
+  active: false,
 };
+
+const DETAILS: (keyof LifePlanInput)[] = ['down_ratio', 'one_off', 'loan_rate', 'loan_years', 'grace_years', 'monthly_cost', 'rent_saved'];
+
+const SCOPES: [PlanScope, string, string][] = [
+  ['cash', '現金與活存', '台幣的銀行、現金帳戶，加上證券帳戶裡的交割款（不含股票）；新開的帳戶會自動算進去。適合緊急預備金。'],
+  ['cash_deposit', '現金＋定存', '現金與活存，再加上台幣定存。'],
+  ['total', '總資產', '含股票，扣掉信用卡和貸款；和其他選「總資產」的項目共用，依目標年月先後分配，同一筆錢不會算兩次。'],
+  ['accounts', '自訂帳戶', '自己勾帳戶，帳戶的金額＝現金＋持股市值；外幣存款要算進去時用這個。'],
+];
 
 const ym = (m: string) => `${m.slice(0, 4)}/${Number(m.slice(5))}`;
 
-/** 人生計劃: big purchases with their down payment progress and loan; feeds the FIRE projection. */
-export function LifePlans({ plan, state, onPlan }: { plan: Plan; state: State; onPlan: Take }) {
+/** 目標與計劃: savings goals and big purchases, their progress and loans; active ones feed the FIRE projection. */
+export function LifePlans({ plan, state, onPlan, className = '' }: { plan: Plan; state: State; onPlan: Take; className?: string }) {
   const [editing, setEditing] = useState<LifePlanInput | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const plans = plan.life_plans;
+  const withLoan = plans.some(p => p.loan);
   // Errors stay in the form, next to the button (they used to go to the top of the page).
   const run = async (call: () => Promise<{ ok: true; plan: Plan } | { ok: false; error: string }>) => {
     setSaving(true);
@@ -42,30 +56,28 @@ export function LifePlans({ plan, state, onPlan }: { plan: Plan; state: State; o
     setEditing(null);
   };
   return (
-    <section className="card span-12" aria-labelledby="life-h">
+    <section className={`card stretch ${className}`} aria-labelledby="life-h">
       <header className="card-head">
-        <h2 id="life-h">人生計劃</h2>
+        <h2 id="life-h">目標與計劃</h2>
         {!editing && (
           <button type="button" className="quiet" onClick={() => (setFormError(null), setEditing(EMPTY))}>
-            新增計劃
+            新增
           </button>
         )}
       </header>
       {plans.length === 0 && !editing && (
-        <p className="muted">
-          任何大筆支出，自己取名字：買房、換車、結婚、出國念書…只要填價格就能開始，其他像目標年月、頭期款、貸款，知道了再補；填了目標年月的計劃會放進下面的退休試算。
-        </p>
+        <p className="muted">例如「緊急預備金 30 萬」或「買房，2030 年 6 月」。大筆支出可以再填頭期款、貸款，放進下面的退休試算。</p>
       )}
       {plans.length > 0 && (
-        <div className="table life-t">
+        <div className={`table life-t${withLoan ? ' with-loan' : ''}`}>
           <div className="thead" aria-hidden>
-            <span>計劃</span>
-            <span>頭期款與費用</span>
+            <span>目標</span>
+            <span>已存／需要</span>
             <span className="hide-sm">每月要存</span>
-            <span>貸款月付</span>
+            {withLoan && <span>貸款月付</span>}
           </div>
           {plans.map(p => (
-            <PlanRow key={p.id} p={p} onEdit={() => (setFormError(null), setEditing(p.input))} />
+            <PlanRow key={p.id} p={p} withLoan={withLoan} onEdit={() => (setFormError(null), setEditing(p.input))} />
           ))}
         </div>
       )}
@@ -85,18 +97,18 @@ export function LifePlans({ plan, state, onPlan }: { plan: Plan; state: State; o
   );
 }
 
-function PlanRow({ p, onEdit }: { p: LifePlan; onEdit(): void }) {
+function PlanRow({ p, withLoan, onEdit }: { p: LifePlan; withLoan: boolean; onEdit(): void }) {
   return (
-    <button type="button" className={`trow ${p.active ? '' : 'archived'}`} onClick={onEdit}>
+    <button type="button" className="trow" onClick={onEdit}>
       <span className="cell">
         <span className="main">
           <span className="ellipsis">{p.name}</span>
         </span>
         <span className="sub ellipsis">
-          {p.target_month ? ym(p.target_month) : '還沒定時間'}
-          {'　價格 '}
-          <Money className="num" value={p.price} />
-          {!p.active && '　不納入試算'}
+          {p.target_month ? ym(p.target_month) : '沒有期限'}
+          {'・'}
+          {p.scope === 'accounts' ? p.accounts.join('、') : p.scope_label}
+          {p.active && '・納入試算'}
         </span>
       </span>
       <span className="cell r">
@@ -114,7 +126,7 @@ function PlanRow({ p, onEdit }: { p: LifePlan; onEdit(): void }) {
       </span>
       <span className="cell r hide-sm">
         {!p.left ? (
-          <span>已備妥</span>
+          <span className="strong">已達成</span>
         ) : p.per_month ? (
           <>
             <Money className="num" value={p.per_month} />
@@ -125,30 +137,32 @@ function PlanRow({ p, onEdit }: { p: LifePlan; onEdit(): void }) {
         ) : (
           <>
             <Money className="num" value={p.left} />
-            <span className="sub">{p.target_month ? '已到時間' : '填目標年月才算'}</span>
+            <span className={`sub${p.overdue ? ' warn' : ''}`}>{p.overdue ? '已過期限' : '還差'}</span>
           </>
         )}
       </span>
-      <span className="cell r">
-        {p.loan ? (
-          <>
-            <Money className="num" value={p.loan.payment} />
-            {p.loan.grace_payment && (
-              <span className="sub">
-                寬限期 <Money className="num" value={p.loan.grace_payment} />
-              </span>
-            )}
-            {p.burden != null && (
-              <span className={`sub lv-${p.burden_level}`}>
-                <i className="lv-dot" aria-hidden />
-                佔收入 {Math.round(p.burden * 100)}%
-              </span>
-            )}
-          </>
-        ) : (
-          <span className="muted small">{p.input.down_ratio === '' ? '全額自付' : '貸款資料未填'}</span>
-        )}
-      </span>
+      {withLoan && (
+        <span className="cell r">
+          {p.loan ? (
+            <>
+              <Money className="num" value={p.loan.payment} />
+              {p.loan.grace_payment && (
+                <span className="sub">
+                  寬限期 <Money className="num" value={p.loan.grace_payment} />
+                </span>
+              )}
+              {p.burden != null && (
+                <span className={`sub lv-${p.burden_level}`}>
+                  <i className="lv-dot" aria-hidden />
+                  佔收入 {Math.round(p.burden * 100)}%
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="muted small">—</span>
+          )}
+        </span>
+      )}
     </button>
   );
 }
@@ -163,7 +177,13 @@ function LifePlanForm(props: {
   onDelete?: () => void;
 }) {
   const [p, setP] = useState(props.initial);
-  const set = (k: keyof LifePlanInput) => (e: React.ChangeEvent<HTMLInputElement>) => setP({ ...p, [k]: e.target.value });
+  // A new plan with a down payment or a loan is a big purchase: turn 納入試算 on, until the user sets it.
+  const [activeSet, setActiveSet] = useState(props.initial.id != null);
+  const set = (k: keyof LifePlanInput) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = { ...p, [k]: e.target.value };
+    if (!activeSet && DETAILS.includes(k)) next.active = DETAILS.some(d => next[d] !== '');
+    setP(next);
+  };
   const toggle = (id: number) =>
     setP({ ...p, account_ids: p.account_ids.includes(id) ? p.account_ids.filter(x => x !== id) : [...p.account_ids, id] });
   const num = (k: keyof LifePlanInput, label: string, hint?: string) => (
@@ -183,54 +203,88 @@ function LifePlanForm(props: {
       <div className="form-row">
         <label>
           名稱
-          <input value={p.name} autoFocus onChange={set('name')} placeholder="例如：買房、換車、出國念書" />
+          <input value={p.name} autoFocus onChange={set('name')} placeholder="緊急預備金、買房…" />
         </label>
-        <label>
-          價格（今天的台幣）
-          <input value={p.price} inputMode="decimal" onChange={set('price')} />
-        </label>
+        {/* not a <label>: the「?」button inside would take the label's clicks */}
+        <div className="form-label">
+          <span className="field-head">
+            <label htmlFor="plan-price">目標金額</label>
+            <HelpTip label="目標金額說明">以今天的購買力填。買東西填總價；下面填了頭期款比例，就只算頭期款和一次性費用要存多少。</HelpTip>
+          </span>
+          <input id="plan-price" value={p.price} inputMode="decimal" onChange={set('price')} placeholder="300000 或 30萬" />
+        </div>
         <label>
           目標年月（可不填）
           <input type="month" value={p.target_month} onChange={set('target_month')} />
         </label>
       </div>
-      <div className="form-row">
-        {num('down_ratio', '頭期款比例 %', '空白＝全額自付')}
-        {num('one_off', '一次性費用', '稅費、仲介、裝潢…')}
+      <div className="field">
+        <span className="field-head">
+          <span className="field-label">追蹤範圍</span>
+          <HelpTip label="追蹤範圍說明">
+            {SCOPES.map(([k, label, text]) => (
+              <Fragment key={k}>
+                <b>{label}</b>
+                {text}
+              </Fragment>
+            ))}
+          </HelpTip>
+        </span>
+        <div className="seg" role="radiogroup" aria-label="追蹤範圍">
+          {SCOPES.map(([k, label]) => (
+            <button key={k} type="button" role="radio" aria-checked={p.scope === k} className={p.scope === k ? 'on' : ''} onClick={() => setP({ ...p, scope: k })}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="form-row">
-        {num('loan_rate', '貸款年利率 %')}
-        {num('loan_years', '貸款年期')}
-        {num('grace_years', '寬限期（年）', '空白＝沒有')}
-      </div>
-      <div className="form-row">
-        {num('monthly_cost', '買了之後每月持有成本', '管理費、保險、油錢…')}
-        {num('rent_saved', '買了之後每月省下的房租')}
-      </div>
-      <fieldset className="checks">
-        <legend>頭期款存在哪些帳戶（不選＝總資產）</legend>
-        {props.accounts.map(a => (
-          <label key={a.id} className="check">
-            <input type="checkbox" checked={p.account_ids.includes(a.id)} onChange={() => toggle(a.id)} />
-            {a.name}
-          </label>
-        ))}
-      </fieldset>
-      <label className="check">
-        <input type="checkbox" checked={p.active} onChange={e => setP({ ...p, active: e.target.checked })} />
-        納入退休試算和健檢
-      </label>
+      {p.scope === 'accounts' && (
+        <fieldset className="checks">
+          <legend>追蹤哪些帳戶</legend>
+          {props.accounts.map(a => (
+            <label key={a.id} className="check">
+              <input type="checkbox" checked={p.account_ids.includes(a.id)} onChange={() => toggle(a.id)} />
+              {a.name}
+            </label>
+          ))}
+        </fieldset>
+      )}
+      <details className="plan-details" open={DETAILS.some(d => props.initial[d] !== '')}>
+        <summary>大筆支出：頭期款、貸款、持有成本</summary>
+        <div className="form-row">
+          {num('down_ratio', '頭期款比例 %', '空白＝全額自付')}
+          {num('one_off', '一次性費用', '稅費、仲介、裝潢…')}
+        </div>
+        <div className="form-row">
+          {num('loan_rate', '貸款年利率 %')}
+          {num('loan_years', '貸款年期')}
+          {num('grace_years', '寬限期（年）', '空白＝沒有')}
+        </div>
+        <div className="form-row">
+          {num('monthly_cost', '買了之後每月持有成本', '管理費、保險、油錢…')}
+          {num('rent_saved', '買了之後每月省下的房租')}
+        </div>
+      </details>
+      <span className="field-head">
+        <label className="check">
+          <input type="checkbox" checked={p.active} onChange={e => (setActiveSet(true), setP({ ...p, active: e.target.checked }))} />
+          納入退休試算和健檢
+        </label>
+        <HelpTip label="納入試算說明">
+          填了目標年月的項目，會在那個月從退休試算的資產扣掉頭期款和費用，之後每月扣貸款和持有成本。緊急預備金這類不會花掉的錢不用勾。
+        </HelpTip>
+      </span>
       {props.error && <p className="message bad">{props.error}</p>}
       <div className="actions">
         <button type="submit" className="primary" disabled={props.saving}>
-          {props.saving ? '儲存中…' : p.id != null ? '儲存計劃' : '建立計劃'}
+          {props.saving ? '儲存中…' : p.id != null ? '儲存' : '建立'}
         </button>
         <button type="button" className="quiet" onClick={props.onCancel}>
           取消
         </button>
         {props.onDelete && (
           <button type="button" className="quiet danger" onClick={props.onDelete}>
-            刪除計劃
+            刪除
           </button>
         )}
       </div>
