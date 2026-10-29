@@ -14,7 +14,7 @@ import { AccountsPanel, CategoriesPanel, SettingsPanel } from './components/Pane
 import { PlanView } from './components/PlanView';
 import { AllocationCard, NetWorthCard } from './components/Summary';
 import { WatchlistCard } from './components/Watchlist';
-import { BrandMark, Icon, type IconName } from './lib/icons';
+import { BrandMark, Icon, type IconName, setCategoryColors } from './lib/icons';
 import { accountColor } from './lib/institutions';
 import { FreshContext } from './lib/motion';
 import { Money, PrivacyContext } from './lib/privacy';
@@ -143,6 +143,7 @@ export default function App() {
     const r = await api.txFields(id);
     if (r.ok) setComposer({ editId: id, fields: r.fields });
     else say(r.error, false);
+    return r.ok;
   }, [say]);
 
   // Editing a search result: the composer replaces the panel, which comes back when it closes.
@@ -150,7 +151,11 @@ export default function App() {
     (id: number) => {
       setPanel(null);
       setBack('search');
-      void edit(id);
+      void edit(id).then(ok => {
+        if (ok) return;
+        setBack(null); // no composer opened: nothing will close and bring the search back
+        setPanel('search');
+      });
     },
     [edit],
   );
@@ -207,6 +212,7 @@ export default function App() {
     );
   }
 
+  setCategoryColors(state.categories); // before the views render their category colours
   const q = state.quotes;
 
   return (
@@ -276,12 +282,10 @@ export default function App() {
           <div className="main">
           <header className="view-head">
             <h1>{VIEWS.find(([v]) => v === view)![1]}</h1>
-            {view === 'assets' && (
-              <span className="head-icons">
-                <AlertsButton state={state} onToast={text => say(text)} />
-                <AdviceButton state={state} />
-              </span>
-            )}
+            <span className="head-icons">
+              <AlertsButton state={state} onToast={text => say(text)} />
+              {view === 'assets' && <AdviceButton state={state} />}
+            </span>
           </header>
         <FreshContext.Provider value={fresh}>
           <main className="page">

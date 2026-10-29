@@ -12,7 +12,8 @@ import threading
 from collections.abc import Callable
 from datetime import datetime, time, timedelta
 
-from .services import recurring
+from . import notify
+from .services import recurring, tracking
 from .services.ledger import Ledger, taipei_now
 
 TW_READY = time(14, 30)
@@ -32,9 +33,11 @@ def last_boundary(now: datetime, at: time, weekdays: set[int]) -> datetime:
 
 
 class Poller:
-    def __init__(self, ledger: Ledger, on_update: Callable[[], None]) -> None:
+    def __init__(self, ledger: Ledger, on_update: Callable[[], None],
+                 send: Callable[[str, str], None] = notify.send) -> None:  # fmt: skip
         self.ledger = ledger
         self.on_update = on_update
+        self.send = send
         self._wake = threading.Event()
         self._force = False
         self._last_tw: datetime | None = None
@@ -73,5 +76,9 @@ class Poller:
                 if us:
                     self._last_us = now
                 self.on_update()
+                try:
+                    tracking.notify_new(self.ledger, self.send)
+                except Exception:
+                    log.exception("notifications failed")
             self._wake.wait(60)
             self._wake.clear()

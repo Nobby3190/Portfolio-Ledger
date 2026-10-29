@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from .. import repo
-from ..models import LIFE_PLAN_KINDS, PLAN_SCOPES, Category, LifePlan, Tx
+from ..models import LIFE_PLAN_KINDS, PLAN_SCOPES, Category, LifePlan, Recurring, Tx
 from . import advisor, dividends, fmt, planner, quick
 
 if TYPE_CHECKING:
@@ -310,11 +310,12 @@ def set_budget(lg: Ledger, category_id: int, amount: str) -> None:
     repo.set_category_budget(lg.db, category_id, _amount(amount, "預算"))
 
 
-def rename_category(lg: Ledger, category_id: int, name: str) -> None:
-    """Renames a category; recurring rules that file under it are rewritten to the new name."""
-    c = repo.get_category(lg.db, category_id)
-    if c is None:
-        raise FinanceError("找不到這個分類")
+# The tones a category can be given by hand (DESIGN.md「管理分類」); each theme defines --tone-<name>.
+CATEGORY_COLORS = ("indigo", "sky", "teal", "plum", "sand", "rose", "ocean", "stone")
+
+
+def _category_name(lg: Ledger, name: str, kind: str, skip: int | None = None) -> str:
+    """A new or changed category name, checked: one word of a quick command, not taken in its kind."""
     name = unicodedata.normalize("NFKC", name).strip()
     if not name:
         raise FinanceError("分類名稱不能空白")
@@ -325,11 +326,14 @@ def rename_category(lg: Ledger, category_id: int, name: str) -> None:
         ok = False
     if not ok:
         raise FinanceError("分類名稱要是一個詞：不能有空白、不能是數字或日期，也不能用 @ 或 # 開頭")
-    if name == c.name:
-        return
-    if any(x.name == name for x in repo.list_categories(lg.db, c.kind) if x.id != c.id):
+    if any(x.name == name for x in repo.list_categories(lg.db, kind) if x.id != skip):
         raise FinanceError(f"已經有「{name}」這個分類")
-    rules = []
+    return name
+
+
+def _rules_using(lg: Ledger, c: Category) -> list[tuple[Recurring, str]]:
+    """Recurring rules that file under a category, each with the word in its line that names it."""
+    out = []
     for r in repo.list_recurring(lg.db):
         try:
             cmd = quick.parse(r.line, lg.today())
@@ -338,21 +342,84 @@ def rename_category(lg: Ledger, category_id: int, name: str) -> None:
         if cmd.action != c.kind or not cmd.category:
             continue
         cat, _ = lg._resolve_category(cmd.category, cmd.action)
-        if cat is None or cat.id != c.id:
-            continue
+        if cat is not None and cat.id == c.id:
+            out.append((r, cmd.category))
+    return out
+
+
+def _get_category(lg: Ledger, category_id: int) -> Category:
+    c = repo.get_category(lg.db, category_id)
+    if c is None:
+        raise FinanceError("找不到這個分類")
+    return c
+
+
+def add_category(lg: Ledger, kind: str, name: str) -> int:
+    if kind not in ("income", "expense"):
+        raise FinanceError("分類要是收入或支出")
+    return repo.add_category(lg.db, _category_name(lg, name, kind), kind)
+
+
+def rename_category(lg: Ledger, category_id: int, name: str) -> None:
+    """Renames a category; recurring rules that file under it are rewritten to the new name."""
+    c = _get_category(lg, category_id)
+    if unicodedata.normalize("NFKC", name).strip() == c.name:
+        return
+    name = _category_name(lg, name, c.kind, skip=c.id)
+    rules = []
+    for r, word in _rules_using(lg, c):
         head, sep, note = r.line.partition("#")
         words = head.split()
-        words[words.index(cmd.category)] = name
+        words[words.index(word)] = name
         r.line = " ".join(words) + (f" #{note}" if sep else "")
         rules.append(r)
     repo.rename_category(lg.db, category_id, name, rules)
 
 
+def set_category_color(lg: Ledger, category_id: int, color: str | None) -> None:
+    _get_category(lg, category_id)
+    if color and color not in CATEGORY_COLORS:
+        raise FinanceError("沒有這個顏色")
+    repo.set_category_color(lg.db, category_id, color or None)
+
+
+def set_category_archived(lg: Ledger, category_id: int, archived: bool) -> None:
+    _get_category(lg, category_id)
+    repo.set_category_archived(lg.db, category_id, archived)
+
+
+def delete_category(lg: Ledger, category_id: int) -> None:
+    """Only a category nothing uses: no entries, no subcategories, no recurring rule (else 封存 it)."""
+    c = _get_category(lg, category_id)
+    n = repo.category_use_counts(lg.db).get(c.id or 0, 0)
+    if n:
+        raise FinanceError(f"「{c.name}」有 {n} 筆紀錄，不能刪除，可以封存")
+    if any(x.parent_id == c.id for x in repo.list_categories(lg.db, c.kind)):
+        raise FinanceError(f"「{c.name}」底下還有子類別，要先把它們移出來")
+    if _rules_using(lg, c):
+        raise FinanceError(f"週期性收支還用到「{c.name}」，不能刪除，可以封存")
+    repo.delete_category(lg.db, category_id)
+
+
+def move_category(lg: Ledger, category_id: int, step: int) -> None:
+    """Swaps a category with its neighbour among its siblings (the tops of its kind, or one top's subcategories);
+    archived ones are listed last, so they move among themselves."""
+    c = _get_category(lg, category_id)
+    cats = repo.list_categories(lg.db, c.kind)  # by sort, id
+    tops = {x.id for x in cats if x.parent_id is None}
+    level = c.parent_id if c.parent_id in tops else None  # a stray subcategory sits with the tops, as in _tree
+    sibs = [x for x in cats if (x.parent_id if x.parent_id in tops else None) == level and x.archived == c.archived]
+    i = next(k for k, x in enumerate(sibs) if x.id == c.id)
+    j = i + (1 if step > 0 else -1)
+    if not 0 <= j < len(sibs):
+        return
+    sibs[i], sibs[j] = sibs[j], sibs[i]
+    repo.set_category_sorts(lg.db, [(x.id or 0, k + 1) for k, x in enumerate(sibs)])
+
+
 def set_category_parent(lg: Ledger, category_id: int, parent_id: int | None) -> None:
     """Files a category under another (子類別, one level only), or back at the top with None."""
-    c = repo.get_category(lg.db, category_id)
-    if c is None:
-        raise FinanceError("找不到這個分類")
+    c = _get_category(lg, category_id)
     if parent_id is not None:
         p = repo.get_category(lg.db, parent_id)
         if p is None:
@@ -484,10 +551,24 @@ def _loan(p: LifePlan) -> tuple[float, planner.Loan | None]:
 
 
 def _plan_month(lg: Ledger, p: LifePlan) -> int | None:
-    """Months from today to the plan's month (at least 1), or None without a month."""
+    """Months from today to the plan's month (at least 1), or None without a month.
+
+    A month already past comes out as 0 or less: the purchase is done, so the projection takes no lump
+    for it any more, only the loan payments and running costs from where they are now (2026-10-23: it
+    used to land on next month and take the down payment a second time).
+    """
     if not p.target_month:
         return None
-    return max(1, planner.months_between(lg.today(), Date.fromisoformat(p.target_month + "-01")) + 1)
+    today = lg.today()
+    ahead = _months_ahead(today, p.target_month)
+    if ahead < 0:
+        return ahead + 1
+    return max(1, planner.months_between(today, Date.fromisoformat(p.target_month + "-01")) + 1)
+
+
+def _months_ahead(today: Date, month: str) -> int:
+    """Calendar months from this month to `month` (YYYY-MM): next month is 1, last month −1."""
+    return int(month[:4]) * 12 + int(month[5:7]) - (today.year * 12 + today.month)
 
 
 def _life_plan(
@@ -506,10 +587,14 @@ def _life_plan(
         saved = max(0.0, min(float(pool[0]), need))
         pool[0] -= Decimal(str(saved))
     left = need - saved
+    # Months left to save, in calendar months (in October: November is 1, December 2), at least 1 while
+    # the target month has not passed (this month: the whole rest now); 0 once it has, which shows 已過期限.
     months = None
+    overdue = False
     if p.target_month:
-        first = Date.fromisoformat(p.target_month + "-01")
-        months = planner.months_between(lg.today(), first) if first > lg.today() else 0
+        ahead = _months_ahead(lg.today(), p.target_month)
+        overdue = ahead < 0
+        months = 0 if overdue else max(1, ahead)
     extra = float(p.monthly_cost or 0) - float(p.rent_saved or 0)
     top_payment = max(loan.grace_payment, loan.payment) if loan else None
     burden = top_payment / float(income) if top_payment and income and income > 0 else None
@@ -540,7 +625,7 @@ def _life_plan(
         "left": money(left) if left > 0 else None,
         "months_left": months,
         "per_month": money(left / months) if left > 0 and months else None,
-        "overdue": left > 0 and months == 0,
+        "overdue": left > 0 and overdue,
         "loan": None
         if loan is None
         else {
@@ -600,16 +685,20 @@ def save_life_plan(lg: Ledger, data: dict[str, Any]) -> int:
     rate = _amount(data.get("loan_rate"), "貸款利率")
     if rate is None and str(data.get("loan_rate") or "").strip():
         rate = ZERO
-    ids = [int(i) for i in data.get("account_ids") or []]
+    ids = list(data.get("account_ids") or [])
     # Callers that send no scope (older ones) meant: ticked accounts, else the shared net worth.
     scope = str(data.get("scope") or ("accounts" if ids else "total"))
     if scope not in PLAN_SCOPES:
         raise FinanceError("請選擇追蹤範圍")
     if scope == "accounts" and not ids:
         raise FinanceError("自訂帳戶要勾選至少一個帳戶")
-    pid = data.get("id")
+    try:
+        pid = int(data["id"]) if data.get("id") is not None else None
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        raise FinanceError("找不到這個計劃") from None
     plan = LifePlan(
-        int(pid) if pid is not None else None, kind, name, price, month, down,
+        pid, kind, name, price, month, down,
         _amount(data.get("one_off"), "一次性費用"), rate, years, grace,
         _amount(data.get("monthly_cost"), "每月持有成本"), _amount(data.get("rent_saved"), "省下的房租"),
         ids if scope == "accounts" else [], bool(data.get("active", True)), scope=scope,
@@ -694,7 +783,7 @@ def advice(lg: Ledger) -> dict[str, Any]:
             continue
         down, loan = _loan(p)
         month = _plan_month(lg, p)
-        if month is not None and month <= horizon:
+        if month is not None and 0 < month <= horizon:  # a past purchase needs no cash on hand
             needs.append(advisor.Need(p.name, p.target_month or "", down + float(p.one_off or 0)))
         if loan:
             loans.append(max(loan.grace_payment, loan.payment))
@@ -845,7 +934,7 @@ def _fire(lg: Ledger, total: Decimal, events: list[tuple[str, planner.PlanEvent]
             "year": year_of(p.months_to_target),
             "delay_years": delay,
             "series": [{"year": y, "value": round(x)} for y, x in p.series],
-            "marks": [{"name": n, "year": e.month / 12} for n, e in events],
+            "marks": [{"name": n, "year": e.month / 12} for n, e in events if e.month > 0],
         }
     return {
         "params": params,

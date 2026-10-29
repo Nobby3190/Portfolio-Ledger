@@ -162,6 +162,41 @@ class Api:
 
         return _call(run)
 
+    def add_category(self, kind: str, name: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.add_category(self._ledger, kind, name)
+            return {"state": self._ledger.state()}
+
+        return _call(run)
+
+    def set_category_color(self, category_id: int, color: str | None) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.set_category_color(self._ledger, category_id, color)
+            return {"state": self._ledger.state()}
+
+        return _call(run)
+
+    def set_category_archived(self, category_id: int, archived: bool) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.set_category_archived(self._ledger, category_id, archived)
+            return {"state": self._ledger.state()}
+
+        return _call(run)
+
+    def move_category(self, category_id: int, step: int) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.move_category(self._ledger, category_id, step)
+            return {"state": self._ledger.state()}
+
+        return _call(run)
+
+    def delete_category(self, category_id: int) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            finance.delete_category(self._ledger, category_id)
+            return {"state": self._ledger.state()}
+
+        return _call(run)
+
     def get_year(self, year: int | None = None) -> dict[str, Any]:
         return _call(lambda: {"year": finance.year_report(self._ledger, year)})
 

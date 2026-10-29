@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import calendar
 import json
+from collections.abc import Callable, Iterable
 from datetime import date as Date
 from datetime import timedelta
 from decimal import Decimal
@@ -15,7 +16,8 @@ from ..models import Note, Security
 from ..providers import finmind, yahoo
 from ..providers.base import ProviderError
 from . import alerts, fmt, fundamentals
-from .finance import MARKET_LABELS, FinanceError, _amount
+from .advisor import LEVELS
+from .finance import MARKET_LABELS, ZERO, FinanceError, _amount
 
 if TYPE_CHECKING:
     from .ledger import Ledger
@@ -203,7 +205,7 @@ def alert_settings(lg: Ledger) -> dict[str, Any]:
 
 def save_alert_settings(lg: Ledger, values: dict[str, Any]) -> None:
     out = alert_settings(lg)
-    for k in ("day_pct", "week_pct"):
+    for k in ("day_pct", "week_pct", "fx_pct"):
         if k in values:
             try:
                 x = float(str(values[k]).strip())
@@ -212,9 +214,42 @@ def save_alert_settings(lg: Ledger, values: dict[str, Any]) -> None:
             if x <= 0:
                 raise FinanceError("提醒門檻要大於 0")
             out[k] = x
-    if "watchlist" in values:
-        out["watchlist"] = bool(values["watchlist"])
+    if "card_days" in values:
+        s = str(values["card_days"]).strip()
+        if not s.isdigit() or int(s) > 28:
+            raise FinanceError("卡費提前天數要是 0 到 28 的整數")
+        out["card_days"] = int(s)
+    for k in ("watchlist", "notify"):
+        if k in values:
+            out[k] = bool(values[k])
     repo.set_setting(lg.db, "alerts", json.dumps(out))
+
+
+def card_targets(lg: Ledger, v: dict[str, Any]) -> list[alerts.CardTarget]:
+    """The cards paid by 自動扣繳, each with its next bill and the rule's recent postings."""
+    today = lg.today()
+    since = (today - timedelta(days=alerts.PAID_DAYS - 1)).isoformat()
+    balance = {a.id: bal for a, bal, _ in v["accounts"]}
+    txs = repo.list_txs(lg.db)
+    accounts = repo.list_accounts(lg.db)
+    out = []
+    for card in accounts:
+        if card.type != "credit" or card.statement_day is None or card.pay_day is None:
+            continue
+        if not (found := lg._autopay_rule(card)):
+            continue
+        rule, payer_name = found
+        payer = next((a for a in accounts if a.name == payer_name), None)
+        pay = lg._next_pay_date(card)
+        bill = lg._card_due(card, pay, set())
+        paid = [(t.date, t.amount) for t in txs
+                if t.recurring_id == rule.id and t.account_id == card.id and since <= t.date <= today.isoformat()]  # fmt: skip
+        out.append(alerts.CardTarget(
+            id=card.id or 0, name=card.name, currency=card.currency, payer=payer_name,
+            payer_balance=balance.get(payer.id, ZERO) if payer else ZERO, statement=bill["statement"], pay_date=pay,
+            due=bill["due"], paid=paid, rule_id=rule.id or 0, error=rule.error,
+        ))  # fmt: skip
+    return out
 
 
 def alerts_report(lg: Ledger) -> dict[str, Any]:
@@ -244,12 +279,48 @@ def alerts_report(lg: Ledger) -> dict[str, Any]:
         ))  # fmt: skip
     settings = alert_settings(lg)
     seen = repo.seen_alerts(lg.db)
-    items = [a for a in alerts.check(targets, today, settings) if a["key"] not in seen]
+    found = (alerts.check(targets, today, settings) + alerts.check_cards(card_targets(lg, v), today, settings)
+             + alerts.check_fx(fx_targets(lg, secs.values()), settings))  # fmt: skip
+    items = sorted((a for a in found if a["key"] not in seen), key=lambda a: LEVELS[a["level"]])
     return {"items": items, "settings": {k: (x if isinstance(x, bool) else f"{x:g}") for k, x in settings.items()}}
+
+
+def fx_targets(lg: Ledger, secs: Iterable[Security]) -> list[alerts.FxTarget]:
+    """The foreign currencies of the open accounts and of the securities held or watched (what
+    Ledger.refresh fetches rates for)."""
+    currencies = ({a.currency for a in repo.list_accounts(lg.db, True)} | {s.currency for s in secs}) - {"TWD"}
+    out = []
+    for cur in sorted(currencies):
+        rates = repo.fx_last_two(lg.db, cur)
+        if rates:
+            out.append(alerts.FxTarget(cur, rates[0][1], rates[0][0], rates[1][1] if len(rates) > 1 else None))
+    return out
 
 
 def dismiss_alert(lg: Ledger, key: str) -> None:
     repo.mark_alert_seen(lg.db, key, lg.today().isoformat())
+
+
+NOTIFY_LISTED = 3
+
+
+def notify_new(lg: Ledger, send: Callable[[str, str], None]) -> int:
+    """One macOS notification for the alerts not sent before (DESIGN.md「系統通知」): titles only, so
+    no amount shows on the lock screen. Returns how many it covered."""
+    if not alert_settings(lg)["notify"]:
+        return 0
+    sent = repo.notified_alerts(lg.db)
+    new = [a for a in alerts_report(lg)["items"] if a["key"] not in sent]  # warnings first
+    if not new:
+        return 0
+    titles = [a["title"] for a in new]
+    if len(new) == 1:
+        send("帳本 Ledger", titles[0])
+    else:
+        body = "、".join(titles[:NOTIFY_LISTED]) + (f"…等 {len(new)} 則" if len(new) > NOTIFY_LISTED else "")
+        send(f"帳本 Ledger：{len(new)} 則新提醒", body)
+    repo.mark_alerts_notified(lg.db, [a["key"] for a in new], lg.today().isoformat())
+    return len(new)
 
 
 # ── 財報快照 ──────────────────────────────────────────────────────────────

@@ -300,7 +300,7 @@ export function RecurringPanel({ state, onState, onClose, onToast }: { state: St
             {shown.map(r => (
               <button key={r.id} type="button" className={`trow ${r.active ? '' : 'paused'}`} onClick={() => open(r)}>
                 <span className="cell-ic">
-                  <IconBadge name={txIcon(r.kind, r.category, r.line)} tone={toneOf(r.kind)} />
+                  <IconBadge name={txIcon(r.kind, r.category, r.line)} tone={toneOf(r.kind)} category={r.category} />
                   <span className="cell">
                     <span className="ellipsis">
                       {r.title}

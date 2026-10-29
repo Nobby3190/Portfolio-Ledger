@@ -212,8 +212,12 @@ def _tx_values(t: Tx) -> tuple:
 
 
 def list_txs(db: Db) -> list[Tx]:
-    """Oldest first, in the order they must be replayed."""
-    return [_tx(r) for r in db.query("SELECT * FROM transactions ORDER BY date, id")]
+    """Oldest first, in the order they must be replayed. Kept until the next write (one preview or save
+    reads them several times): the list is the caller's, the Tx objects are shared and only read."""
+    with db.lock:
+        if db.txs is None or db.txs[0] != db.version:
+            db.txs = (db.version, [_tx(r) for r in db.query("SELECT * FROM transactions ORDER BY date, id")])
+        return list(db.txs[1])
 
 
 def get_tx(db: Db, tx_id: int) -> Tx | None:
@@ -322,7 +326,7 @@ def delete_recurring(db: Db, rule_id: int) -> None:
 
 
 def _category(r: sqlite3.Row) -> Category:
-    return Category(r["id"], r["name"], r["kind"], _d(r["budget"]), r["sort"], bool(r["archived"]), r["parent_id"])
+    return Category(r["id"], r["name"], r["kind"], _d(r["budget"]), r["sort"], bool(r["archived"]), r["parent_id"], r["color"])
 
 
 def list_categories(db: Db, kind: str | None = None) -> list[Category]:
@@ -361,6 +365,27 @@ def rename_category(db: Db, category_id: int, name: str, recurring: Iterable[Rec
 def set_category_parent(db: Db, category_id: int, parent_id: int | None) -> None:
     with db.write() as c:
         c.execute("UPDATE categories SET parent_id = ? WHERE id = ?", (parent_id, category_id))
+
+
+def set_category_color(db: Db, category_id: int, color: str | None) -> None:
+    with db.write() as c:
+        c.execute("UPDATE categories SET color = ? WHERE id = ?", (color, category_id))
+
+
+def set_category_archived(db: Db, category_id: int, archived: bool) -> None:
+    with db.write() as c:
+        c.execute("UPDATE categories SET archived = ? WHERE id = ?", (int(archived), category_id))
+
+
+def set_category_sorts(db: Db, sorts: Iterable[tuple[int, int]]) -> None:
+    """(category id, sort) pairs, saved together."""
+    with db.write() as c:
+        c.executemany("UPDATE categories SET sort = ? WHERE id = ?", [(s, i) for i, s in sorts])
+
+
+def delete_category(db: Db, category_id: int) -> None:
+    with db.write() as c:
+        c.execute("DELETE FROM categories WHERE id = ?", (category_id,))
 
 
 def category_use_counts(db: Db) -> dict[int, int]:
@@ -471,6 +496,15 @@ def fx_on(db: Db, currency: str, date: str | None = None, prefer: str | None = N
     return (Decimal(rows[0]["rate"]), rows[0]["date"]) if rows else None
 
 
+def fx_last_two(db: Db, currency: str) -> list[tuple[str, Decimal]]:
+    """The two newest market mid-rates, newest first. Bank board rows are left out: a board rate
+    next to a market one would read as a move."""
+    rows = db.query(
+        "SELECT date, rate FROM fx_rates WHERE currency = ? AND source = 'yahoo' ORDER BY date DESC LIMIT 2", (currency,)
+    )
+    return [(r["date"], Decimal(r["rate"])) for r in rows]
+
+
 def fx_sell_on(db: Db, currency: str, date: str) -> Decimal | None:
     """The bank's selling rate on `date` or the closest earlier board day (None without board data)."""
     rows = db.query(
@@ -561,6 +595,15 @@ def delete_note(db: Db, symbol: str) -> None:
 
 def seen_alerts(db: Db) -> set[str]:
     return {r["key"] for r in db.query("SELECT key FROM alert_seen")}
+
+
+def notified_alerts(db: Db) -> set[str]:
+    return {r["key"] for r in db.query("SELECT key FROM alert_notified")}
+
+
+def mark_alerts_notified(db: Db, keys: Iterable[str], date: str) -> None:
+    with db.write() as c:
+        c.executemany("INSERT OR REPLACE INTO alert_notified (key, date) VALUES (?, ?)", [(k, date) for k in keys])
 
 
 def mark_alert_seen(db: Db, key: str, date: str) -> None:

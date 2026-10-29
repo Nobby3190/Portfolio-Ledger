@@ -65,6 +65,7 @@ class Category:
     sort: int = 0
     archived: bool = False
     parent_id: int | None = None  # 子類別: the category it rolls up into (one level only)
+    color: str | None = None  # a tone name (sky, plum…); None = from the name
 
 
 # What a goal or plan counts as saved so far (DESIGN.md 規劃視圖「追蹤範圍」).

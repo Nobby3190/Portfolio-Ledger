@@ -215,9 +215,9 @@ def from_commit(lg: Ledger, text: str, tx_id: int, freq: str = "monthly") -> Non
     tx = repo.get_tx(lg.db, tx_id)
     if tx is None:
         return
-    rule_id = repo.save_recurring(
-        lg.db, Recurring(None, _plain_line(lg, _undated(lg, text)), freq, tx.date, last_date=tx.date)
-    )
+    # A past date repeats from today on: only that one entry was asked for, not the months in between.
+    last = max(tx.date, lg.today().isoformat())
+    rule_id = repo.save_recurring(lg.db, Recurring(None, _plain_line(lg, _undated(lg, text)), freq, tx.date, last_date=last))
     repo.mark_recurring(lg.db, tx_id, rule_id)
 
 

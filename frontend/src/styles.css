@@ -4,6 +4,7 @@
    the allocation card gets its own categorical palette (no red/green in it). */
 
 :root {
+  --content-max: 1600px; /* topbar, view head and page all stop here; was 1180 until 2026-10-26 */
   --logo-a: #2d3182; /* BrandMark gradient (2026-10-23) */
   --logo-b: #5b3fb0;
   --page: #fbf4e9;
@@ -54,6 +55,10 @@
   --tone-teal: #647f2c;
   --tone-plum: #a3404c;
   --tone-sand: #835a34;
+  /* rose, ocean, stone: only picked by hand in 管理分類 (the names are slots: each theme has its own set) */
+  --tone-rose: #a8437a;
+  --tone-ocean: #2f6d8c;
+  --tone-stone: #6b737d;
   --tone-expense: #b0603a;
   --tone-income: #a07a1a;
   --tone-neutral: #a8927b;
@@ -121,6 +126,9 @@
     --tone-teal: #25666f;
     --tone-plum: #6e4778;
     --tone-sand: #6f5b3a;
+    --tone-rose: #8a3f68;
+    --tone-ocean: #8a5a2e;
+    --tone-stone: #5a6470;
     --tone-expense: #3e5268;
     --tone-income: #5a7189;
     --tone-neutral: #46525f;
@@ -249,7 +257,7 @@ kbd {
 }
 
 .topbar-in {
-  max-width: 1180px;
+  max-width: var(--content-max);
   margin: 0 auto;
   padding: 12px 32px;
   display: flex;
@@ -341,7 +349,7 @@ kbd {
 /* ── page & panels ────────────────────────────────────────── */
 
 .page {
-  max-width: 1180px;
+  max-width: var(--content-max);
   margin: 0 auto;
   padding: 28px 32px 48px;
 }
@@ -1583,8 +1591,7 @@ button.trow:hover {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding: 72px 16px 16px;
-  overflow-y: auto;
+  padding: min(72px, 8vh) 16px 16px;
 }
 
 .scrim {
@@ -1603,14 +1610,29 @@ button.trow:hover {
   animation: sheet-out 0.15s ease-in both;
 }
 
+/* The sheet scrolls inside itself, never past the window (2026-10-23: on a short window the page-level
+   scroll in WebKit dropped the bottom padding and 新增帳戶 ended up below the edge). */
 .sheet {
   width: min(560px, 100%);
+  max-height: calc(100vh - min(72px, 8vh) - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--card);
   border: 1px solid var(--rule);
   border-radius: 12px;
   padding: 20px 24px 24px;
   outline: none;
   box-shadow: 0 12px 40px rgb(0 0 0 / 0.18);
+}
+
+/* The title and 關閉 stay at the top while the body scrolls. */
+.sheet > header {
+  position: sticky;
+  top: -20px; /* sticky insets by the sheet's top padding; cover that strip too */
+  z-index: 3;
+  margin: -20px -24px 8px;
+  padding: 20px 24px 8px;
+  background: var(--card);
 }
 
 .sheet header {
@@ -3519,7 +3541,7 @@ body {
   min-width: 0;
 }
 .view-head {
-  max-width: 1180px;
+  max-width: var(--content-max);
   margin: 0 auto;
   padding: 26px 32px 0;
   display: flex;
@@ -4210,7 +4232,7 @@ body {
 .cat-admin-head,
 .cat-admin-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 140px 48px;
+  grid-template-columns: minmax(0, 1fr) 140px 48px 28px;
   gap: 10px;
   align-items: center;
 }
@@ -4239,6 +4261,102 @@ body {
 }
 .cat-admin .r {
   text-align: right;
+}
+.cat-admin-row.archived .cat-admin-name input,
+.cat-admin-row.archived .icon-badge {
+  opacity: 0.55;
+}
+.cat-admin-tag {
+  flex: none;
+  font-size: 12px;
+}
+.cat-color,
+.cat-menu {
+  position: relative;
+  display: inline-flex;
+}
+.cat-color-btn,
+.cat-menu-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.cat-menu-btn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+}
+.cat-color-btn:hover,
+.cat-color-btn[aria-expanded='true'] {
+  box-shadow: 0 0 0 2px var(--rule);
+}
+.cat-menu-btn:hover,
+.cat-menu-btn[aria-expanded='true'] {
+  color: var(--ink);
+  background: var(--card-2);
+}
+/* the swatches or the 「⋯」 menu, under its button */
+.cat-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 5;
+  padding: 10px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: var(--shadow), 0 4px 16px rgb(0 0 0 / 0.12);
+}
+.cat-color .cat-pop {
+  left: -6px;
+  width: max-content;
+  max-width: min(380px, 80vw);
+}
+.cat-menu-list {
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 4px;
+}
+.cat-menu-list button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.cat-menu-list button:hover:not(:disabled) {
+  background: var(--card-2);
+}
+.cat-menu-list button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+.cat-menu-list button.danger {
+  color: var(--red);
+}
+.cat-menu-note {
+  padding: 7px 10px;
+  font-size: 12px;
+  border-top: 1px solid var(--rule);
+  margin-top: 2px;
+}
+.cat-admin-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0 0;
+}
+.cat-admin-add input {
+  flex: 1;
+  min-width: 0;
 }
 
 /* ── 亮色：卡片中性，顏色只給資料 (2026-10-19；2026-10-21 改暖色：主色橘、主卡橘色漸層) ──────

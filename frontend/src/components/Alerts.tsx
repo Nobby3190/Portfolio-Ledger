@@ -8,9 +8,10 @@ import { Sheet } from './Panels';
 
 const LEVEL_LABEL = { warn: '警示', note: '提醒', ok: '資訊' } as const;
 
-/** 提醒: price moves, the user's price band, review dates and coming 除息 for holdings and the watchlist.
- *  A blinking bell beside 健檢 in the top bar (資產 only) while any is left; it goes once every one is
- *  dismissed (2026-10-20, was a card beside 持股). A toast says when a refresh brought new ones. */
+/** 提醒: price moves, the user's price band, review dates and coming 除息 for holdings and the watchlist,
+ *  and the bills of cards paid by 自動扣繳. A blinking bell in the top bar of every view (beside 健檢 on
+ *  資產) while any is left; it goes once every one is dismissed (2026-10-20, was a card beside 持股).
+ *  A toast says when a refresh brought new ones. */
 export function AlertsButton({ state, onToast }: { state: State; onToast(text: string): void }) {
   const [data, setData] = useState<AlertsData | null>(null);
   const [open, setOpen] = useState(false);
@@ -84,7 +85,7 @@ function AlertsBody({ data, take }: { data: AlertsData; take(r: AlertsRes): void
         ))}
       </ul>
       <footer className="advice-foot">
-        <span className="muted tiny">依收盤價和你自己寫的投資筆記，門檻在設定裡改</span>
+        <span className="muted tiny">依收盤價、你寫的投資筆記和信用卡帳單，門檻在設定裡改</span>
       </footer>
     </div>
   );

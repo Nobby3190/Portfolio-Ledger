@@ -149,7 +149,7 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
                     about it in one card (使用者回饋 2026-10-16). Money stays masked in privacy mode. */}
                 <span className="tip row-tip" role="tooltip">
                   <span className="row-tip-name">
-                    <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
+                    <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" category={c.name} />
                     {c.name}
                     <span className="muted">佔 {Math.round(c.share * 100)}%</span>
                   </span>
@@ -182,7 +182,7 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
                   </span>
                 </span>
                 <span className="cell-ic">
-                  <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
+                  <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" category={c.name} />
                   <span className="cell">
                     <span className="ellipsis">{c.name}</span>
                     <span className="sub">
@@ -267,7 +267,7 @@ export function YearView({ state, onPickMonth }: { state: State; onPickMonth(mon
               {y.income_categories.map(c => (
                 <div key={c.name} className="trow">
                   <span className="cell-ic">
-                    <IconBadge name={categoryIcon(c.name, 'income')} tone="income" />
+                    <IconBadge name={categoryIcon(c.name, 'income')} tone="income" category={c.name} />
                     <span className="cell">
                       <span className="ellipsis">{c.name}</span>
                       <span className="sub">佔 {Math.round(c.share * 100)}%</span>

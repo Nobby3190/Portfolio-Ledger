@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { Money, PrivacyContext, Trend } from '../lib/privacy';
 import type { Plan, PlanParams, State } from '../types';
@@ -43,18 +43,38 @@ export function PlanView({ state }: { state: State }) {
 
 type Take = (r: { ok: true; plan: Plan } | { ok: false; error: string }) => void;
 
+/** Form values that follow the server's, except while the user has unsent edits: a reply to an earlier
+ * save (or a refetch) arriving mid-typing must not overwrite the field being typed in. */
+function useDraft<T>(server: T): [T, (v: T) => void, () => T | null] {
+  const [draft, setDraft] = useState(server);
+  const base = useRef(server); // the values the draft last matched: synced or sent
+  useEffect(() => {
+    const prev = base.current;
+    setDraft(cur => (same(cur, prev) ? server : cur));
+    base.current = server;
+  }, [server]);
+  // The values to save, or null when nothing changed since the last sync or save (Enter then blur).
+  const take = () => {
+    if (same(draft, base.current)) return null;
+    base.current = draft;
+    return draft;
+  };
+  return [draft, setDraft, take];
+}
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
 const MIX_TONES = ['var(--tone-indigo)', 'var(--tone-sky)', 'var(--tone-teal)', 'var(--tone-plum)', 'var(--tone-sand)'];
 
 // ── 再平衡 ───────────────────────────────────────────────────────────
 
 function Rebalance({ plan, onPlan }: { plan: Plan; onPlan: Take }) {
-  const [targets, setTargets] = useState<Record<string, string>>(() =>
-    Object.fromEntries(plan.rebalance.map(r => [r.label, String(r.target_raw)])),
-  );
-  useEffect(() => {
-    setTargets(Object.fromEntries(plan.rebalance.map(r => [r.label, String(r.target_raw)])));
-  }, [plan]);
-  const save = async () => onPlan(await api.saveTargets(targets));
+  const server = useMemo(() => Object.fromEntries(plan.rebalance.map(r => [r.label, String(r.target_raw)])), [plan]);
+  const [targets, setTargets, take] = useDraft<Record<string, string>>(server);
+  const save = async () => {
+    const t = take();
+    if (t) onPlan(await api.saveTargets(t));
+  };
 
   return (
     <section className="card stretch span-4" aria-labelledby="rb-h">
@@ -141,9 +161,11 @@ const FIRE_FIELDS: { key: keyof PlanParams; label: string; unit: string; auto?: 
 function Fire({ plan, onPlan }: { plan: Plan; onPlan: Take }) {
   const hidden = useContext(PrivacyContext);
   const f = plan.fire;
-  const [params, setParams] = useState<PlanParams>(f.params);
-  useEffect(() => setParams(f.params), [f.params]);
-  const save = async () => onPlan(await api.savePlan(params));
+  const [params, setParams, take] = useDraft<PlanParams>(f.params);
+  const save = async () => {
+    const p = take();
+    if (p) onPlan(await api.savePlan(p));
+  };
   const thisYear = new Date().getFullYear();
   // Show a few years past the finish line, not always the full 50-year horizon.
   const wp = f.with_plans;

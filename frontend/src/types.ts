@@ -270,6 +270,8 @@ export interface Category {
   count: number; // all time
   parent_id: number | null; // 子類別: rolls up into this one
   sort: number;
+  color: string | null; // a tone name (sky, plum…) picked in 管理分類; null = from the name
+  archived: boolean; // listed last; not offered as a composer chip
 }
 
 export interface MonthCategory {
@@ -508,7 +510,7 @@ export interface AlertItem extends AdviceItem {
 
 export interface Alerts {
   items: AlertItem[];
-  settings: { day_pct: string; week_pct: string; watchlist: boolean };
+  settings: { day_pct: string; week_pct: string; watchlist: boolean; card_days: string; fx_pct: string; notify: boolean };
 }
 
 /** 財報快照 (tracking.fundamentals_report): public numbers and the 7 去劣 checks; never a verdict. */

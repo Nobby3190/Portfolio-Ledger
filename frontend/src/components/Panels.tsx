@@ -1,6 +1,6 @@
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { accountIcon, categoryIcon, Icon, IconBadge, type IconName } from '../lib/icons';
+import { accountIcon, autoTone, CATEGORY_COLORS, categoryIcon, Icon, IconBadge, type IconName } from '../lib/icons';
 import { accountColor, INSTITUTIONS, type Institution, type InstitutionKind, institutionOf, SWATCHES } from '../lib/institutions';
 import { useReducedMotion } from '../lib/motion';
 import { Money } from '../lib/privacy';
@@ -61,18 +61,16 @@ export function Sheet({
   );
 }
 
-/** A「?」that shows its text in a small bubble; closes on a second click, Esc or a click elsewhere. */
-export function HelpTip({ label = '說明', children }: { label?: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
+/** Closes a bubble or menu on Esc or a click outside `ref`. */
+function useDismiss(open: boolean, close: () => void, ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && close();
     // Capture, so Esc closes the bubble without also closing the sheet.
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.stopImmediatePropagation();
-      setOpen(false);
+      close();
     };
     document.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey, true);
@@ -80,7 +78,15 @@ export function HelpTip({ label = '說明', children }: { label?: string; childr
       document.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey, true);
     };
-  }, [open]);
+  }, [open, close, ref]);
+}
+
+/** A「?」that shows its text in a small bubble; closes on a second click, Esc or a click elsewhere. */
+export function HelpTip({ label = '說明', children }: { label?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(open, close, ref);
   return (
     <span className="help-tip" ref={ref}>
       <button type="button" className="help-btn" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}>
@@ -884,14 +890,18 @@ export function SettingsPanel({ state, onState, onClose }: { state: State; onSta
   );
 }
 
-/** 管理分類: rename a category, or file it under another (子類別, one level). */
+/** 管理分類: name, colour, where it sits (子類別, one level) and its order; add, archive or delete. */
 export function CategoriesPanel({ state, onState, onClose }: { state: State; onState(s: State): void; onClose(): void }) {
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
 
   async function done(r: { ok: true; state: State } | { ok: false; error: string }) {
-    if (!r.ok) return setMsg({ text: r.error, bad: true });
+    if (!r.ok) {
+      setMsg({ text: r.error, bad: true });
+      return false;
+    }
     setMsg({ text: '已儲存' });
     onState(r.state);
+    return true;
   }
 
   return (
@@ -900,7 +910,14 @@ export function CategoriesPanel({ state, onState, onClose }: { state: State; onS
       onClose={onClose}
       actions={
         <HelpTip label="分類說明">
-          子類別的花費會算進上層分類：收支報表只列上層，展開才看到子類別。上層的預算管整組（自己＋子類別），子類別也可以有自己的預算。記帳時直接寫子類別的名稱就好（<code>支出 30 數碼</code>）。只能分一層。改名時，週期性收支裡用到這個分類的也會一起改。
+          <b>子類別</b>
+          子類別的花費會算進上層分類：收支報表只列上層，展開才看到子類別。上層的預算管整組（自己＋子類別），子類別也可以有自己的預算。記帳時直接寫子類別的名稱就好（<code>支出 30 數碼</code>）。只能分一層。
+          <b>改名</b>
+          週期性收支裡用到這個分類的也會一起改。
+          <b>顏色</b>
+          點名稱前的圖示挑。「自動」是照名稱配的顏色。
+          <b>封存與刪除</b>
+          封存的分類不會出現在記帳的分類鈕，沒花費的月份也不列進報表；打它的完整名稱還是會記進去。沒有任何紀錄、也沒有週期性收支用到的分類才能刪除。
         </HelpTip>
       }
     >
@@ -912,18 +929,22 @@ export function CategoriesPanel({ state, onState, onClose }: { state: State; onS
   );
 }
 
-function CategoryKind({
-  kind,
-  cats,
-  onDone,
-}: {
-  kind: 'income' | 'expense';
-  cats: Category[];
-  onDone(r: { ok: true; state: State } | { ok: false; error: string }): void;
-}) {
-  const mine = cats.filter(c => c.kind === kind).sort((a, b) => a.sort - b.sort || a.id - b.id);
+type CatResult = { ok: true; state: State } | { ok: false; error: string };
+
+function CategoryKind({ kind, cats, onDone }: { kind: 'income' | 'expense'; cats: Category[]; onDone(r: CatResult): Promise<boolean> }) {
+  const [adding, setAdding] = useState('');
+  // Archived last, then by sort (finance.move_category swaps within those).
+  const order = (a: Category, b: Category) => Number(a.archived) - Number(b.archived) || a.sort - b.sort || a.id - b.id;
+  const mine = cats.filter(c => c.kind === kind).sort(order);
   const tops = mine.filter(c => c.parent_id == null || !mine.some(p => p.id === c.parent_id));
-  const rows = tops.flatMap(t => [t, ...mine.filter(c => c.parent_id === t.id)]);
+  const levels = tops.map(t => mine.filter(c => c.parent_id === t.id));
+  const rows = tops.flatMap((t, i) => [{ c: t, sibs: tops }, ...levels[i].map(k => ({ c: k, sibs: levels[i] }))]);
+
+  async function add() {
+    const name = adding.trim();
+    if (name && (await onDone(await api.addCategory(kind, name)))) setAdding('');
+  }
+
   return (
     <section className="cat-admin" aria-label={kind === 'expense' ? '支出分類' : '收入分類'}>
       <h3>{kind === 'expense' ? '支出' : '收入'}</h3>
@@ -931,14 +952,18 @@ function CategoryKind({
         <span>名稱</span>
         <span>放在</span>
         <span className="r">筆數</span>
+        <span />
       </div>
-      {rows.map(c => {
+      {rows.map(({ c, sibs }) => {
         const sub = !tops.includes(c);
         const hasKids = mine.some(x => x.parent_id === c.id);
+        // Neighbours in the same archived group, as move_category sees them.
+        const peers = sibs.filter(x => x.archived === c.archived);
+        const at = peers.indexOf(c);
         return (
-          <div key={c.id} className={`cat-admin-row ${sub ? 'sub' : ''}`}>
+          <div key={c.id} className={`cat-admin-row ${sub ? 'sub' : ''} ${c.archived ? 'archived' : ''}`}>
             <span className="cat-admin-name">
-              <IconBadge name={categoryIcon(c.name, kind)} tone={kind} />
+              <CategoryColor c={c} onPick={async color => onDone(await api.setCategoryColor(c.id, color))} />
               <input
                 key={c.name} // reset after a rename (or a refused one)
                 defaultValue={c.name}
@@ -952,6 +977,7 @@ function CategoryKind({
                   onDone(r);
                 }}
               />
+              {c.archived && <span className="muted cat-admin-tag">已封存</span>}
             </span>
             <select
               value={c.parent_id ?? ''}
@@ -970,10 +996,114 @@ function CategoryKind({
                 ))}
             </select>
             <span className="num muted r">{c.count}</span>
+            <CategoryMenu
+              c={c}
+              first={at === 0}
+              last={at === peers.length - 1}
+              blocked={c.count > 0 ? `有 ${c.count} 筆紀錄，只能封存` : hasKids ? '底下有子類別，只能封存' : null}
+              onDone={onDone}
+            />
           </div>
         );
       })}
+      <div className="cat-admin-add">
+        <input
+          value={adding}
+          placeholder="＋ 新增分類"
+          aria-label={kind === 'expense' ? '新增支出分類' : '新增收入分類'}
+          onChange={e => setAdding(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && add()}
+        />
+        {adding.trim() && (
+          <button type="button" className="quiet" onClick={add}>
+            新增
+          </button>
+        )}
+      </div>
     </section>
+  );
+}
+
+/** The row's icon in its colour; a click opens the swatches (自動 + CATEGORY_COLORS). */
+function CategoryColor({ c, onPick }: { c: Category; onPick(color: string | null): Promise<boolean> }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(open, close, ref);
+  async function pick(color: string | null) {
+    if (await onPick(color)) setOpen(false);
+  }
+  return (
+    <span className="cat-color" ref={ref}>
+      <button type="button" className="cat-color-btn" aria-label={`${c.name}的顏色`} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <IconBadge name={categoryIcon(c.name, c.kind)} tone={c.kind} category={c.name} />
+      </button>
+      {open && (
+        <span className="cat-pop swatches" role="radiogroup" aria-label={`${c.name}的顏色`}>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!c.color}
+            className={`swatch auto ${!c.color ? 'on' : ''}`}
+            style={{ '--sw': `var(--tone-${autoTone(c.name, c.kind)})` } as CSSProperties}
+            onClick={() => pick(null)}
+          >
+            自動
+          </button>
+          {CATEGORY_COLORS.map((k, i) => (
+            <button
+              key={k}
+              type="button"
+              role="radio"
+              aria-checked={c.color === k}
+              aria-label={`顏色 ${i + 1}`}
+              className={`swatch ${c.color === k ? 'on' : ''}`}
+              style={{ '--sw': `var(--tone-${k})` } as CSSProperties}
+              onClick={() => pick(k)}
+            />
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** 「⋯」: 上移／下移 among its siblings, 封存, and 刪除 when nothing uses it (`blocked` says why not). */
+function CategoryMenu({ c, first, last, blocked, onDone }: { c: Category; first: boolean; last: boolean; blocked: string | null; onDone(r: CatResult): Promise<boolean> }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(open, close, ref);
+  async function run(call: Promise<CatResult>) {
+    setOpen(false);
+    onDone(await call);
+  }
+  return (
+    <span className="cat-menu" ref={ref}>
+      <button type="button" className="cat-menu-btn" aria-label={`${c.name}的更多操作`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon name="dots" />
+      </button>
+      {open && (
+        <span className="cat-pop cat-menu-list" role="menu">
+          <button type="button" role="menuitem" disabled={first} onClick={() => run(api.moveCategory(c.id, -1))}>
+            上移
+          </button>
+          <button type="button" role="menuitem" disabled={last} onClick={() => run(api.moveCategory(c.id, 1))}>
+            下移
+          </button>
+          <button type="button" role="menuitem" onClick={() => run(api.setCategoryArchived(c.id, !c.archived))}>
+            {c.archived ? '取消封存' : '封存'}
+          </button>
+          {blocked ? (
+            <span className="muted cat-menu-note">{blocked}</span>
+          ) : (
+            <button type="button" role="menuitem" className="danger" onClick={() => run(api.deleteCategory(c.id))}>
+              刪除
+            </button>
+          )}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -993,16 +1123,16 @@ const THRESHOLDS: [string, string, string][] = [
   ['broker_pct', '單一券商佔投資超過', '%'],
 ];
 
-/** 價格提醒 thresholds (DESIGN.md v1.4), collapsed by default. */
+/** 提醒 thresholds (DESIGN.md v1.4, 信用卡自動扣繳, 匯率異動) and the 系統通知 switch, collapsed by default. */
 function AlertSettings({ onSaved }: { onSaved(ok: true | string): void }) {
   const [open, setOpen] = useState(false);
-  const [values, setValues] = useState<{ day_pct: string; week_pct: string; watchlist: boolean } | null>(null);
+  const [values, setValues] = useState<{ day_pct: string; week_pct: string; watchlist: boolean; card_days: string; fx_pct: string; notify: boolean } | null>(null);
   useEffect(() => {
     if (!open || values) return;
     void api.alerts().then(r => r.ok && setValues(r.alerts.settings));
   }, [open, values]);
 
-  async function save(next: Partial<{ day_pct: string; week_pct: string; watchlist: boolean }>) {
+  async function save(next: Partial<{ day_pct: string; week_pct: string; watchlist: boolean; card_days: string; fx_pct: string; notify: boolean }>) {
     const r = await api.saveAlertSettings(next);
     if (r.ok) setValues(r.alerts.settings);
     onSaved(r.ok ? true : r.error);
@@ -1011,7 +1141,7 @@ function AlertSettings({ onSaved }: { onSaved(ok: true | string): void }) {
   return (
     <div className="inline-form">
       <button type="button" className="quiet" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {open ? '▾' : '▸'} 價格提醒
+        {open ? '▾' : '▸'} 提醒
       </button>
       {open && values && (
         <form className="form thresholds" onSubmit={e => e.preventDefault()}>
@@ -1032,6 +1162,24 @@ function AlertSettings({ onSaved }: { onSaved(ok: true | string): void }) {
           <label className="check">
             <input type="checkbox" checked={values.watchlist} onChange={e => void save({ watchlist: e.target.checked })} />
             自選股也提醒
+          </label>
+          <label>
+            卡費提前
+            <span className="unit-input">
+              <input className="num" inputMode="numeric" defaultValue={values.card_days} onBlur={e => e.target.value !== values.card_days && void save({ card_days: e.target.value })} />
+              <span className="muted">天</span>
+            </span>
+          </label>
+          <label>
+            匯率單日漲跌超過
+            <span className="unit-input">
+              <input className="num" inputMode="decimal" defaultValue={values.fx_pct} onBlur={e => e.target.value !== values.fx_pct && void save({ fx_pct: e.target.value })} />
+              <span className="muted">%</span>
+            </span>
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={values.notify} onChange={e => void save({ notify: e.target.checked })} />
+            有新提醒時跳系統通知
           </label>
         </form>
       )}

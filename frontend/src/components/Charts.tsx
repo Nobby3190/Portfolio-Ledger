@@ -234,25 +234,27 @@ export function LineChart({
               style={s.color ? { stroke: s.color } : undefined}
             />
           ))}
-          {marks
-            .filter(mk => mk.x >= 0 && mk.x <= n - 1)
-            .map(mk => {
-              const vs = series[0].values;
-              const i0 = Math.floor(mk.x);
-              const i1 = Math.min(n - 1, i0 + 1);
-              const a = vs[i0];
-              const b = vs[i1];
-              if (a == null || b == null) return null;
-              const v = a + (b - a) * (mk.x - i0);
-              return (
-                <g key={mk.label + mk.x}>
-                  <circle cx={x(mk.x)} cy={y(v)} r="4.5" className="mark" />
-                  <text x={x(mk.x)} y={y(v) - 10} className="tick strong" textAnchor="middle">
-                    {mk.label}
-                  </text>
-                </g>
-              );
-            })}
+          {placeMarks(
+            marks
+              .filter(mk => mk.x >= 0 && mk.x <= n - 1)
+              .map(mk => {
+                const vs = series[0].values;
+                const i0 = Math.floor(mk.x);
+                const i1 = Math.min(n - 1, i0 + 1);
+                const a = vs[i0];
+                const b = vs[i1];
+                if (a == null || b == null) return null;
+                return { ...mk, px: x(mk.x), py: y(a + (b - a) * (mk.x - i0)) };
+              })
+              .filter(mk => mk != null),
+          ).map(mk => (
+            <g key={mk.label + mk.x}>
+              <circle cx={mk.px} cy={mk.py} r="4.5" className="mark" />
+              <text x={mk.px} y={mk.py - 10 - mk.row * 15} className="tick strong" textAnchor="middle">
+                {mk.label}
+              </text>
+            </g>
+          ))}
           {hover != null && (
             <g>
               <line x1={hx} x2={hx} y1={PAD.top} y2={PAD.top + ih} className="cross" />
@@ -411,4 +413,20 @@ export function Donut({ slices, total, totalLabel, ariaLabel, hover, onHover }: 
       </div>
     </div>
   );
+}
+
+/** Lifts a mark's label a row up when it would overlap the one before it (2026-10-23: two plans in the
+ *  same year printed their names on top of each other). Widths are estimated: CJK ~12px, others ~7px. */
+function placeMarks<T extends { label: string; px: number }>(marks: T[]): (T & { row: number })[] {
+  const width = (t: string) => [...t].reduce((w, c) => w + (c.charCodeAt(0) > 0x2e80 ? 12 : 7), 0);
+  const ends: number[] = []; // right edge of the last label on each row
+  return [...marks]
+    .sort((a, b) => a.px - b.px)
+    .map(mk => {
+      const half = width(mk.label) / 2 + 4;
+      let row = ends.findIndex(end => mk.px - half >= end);
+      if (row < 0) row = ends.length;
+      ends[row] = mk.px + half;
+      return { ...mk, row };
+    });
 }

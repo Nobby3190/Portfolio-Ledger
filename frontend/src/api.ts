@@ -25,6 +25,11 @@ interface PyApi {
   set_total_budget(amount: string, month: string | null): Promise<Res<{ month: MonthReport }>>;
   rename_category(id: number, name: string): Promise<Res<{ state: State }>>;
   set_category_parent(id: number, parentId: number | null): Promise<Res<{ state: State }>>;
+  add_category(kind: 'income' | 'expense', name: string): Promise<Res<{ state: State }>>;
+  set_category_color(id: number, color: string | null): Promise<Res<{ state: State }>>;
+  set_category_archived(id: number, archived: boolean): Promise<Res<{ state: State }>>;
+  move_category(id: number, step: number): Promise<Res<{ state: State }>>;
+  delete_category(id: number): Promise<Res<{ state: State }>>;
   get_year(year: number | null): Promise<Res<{ year: YearReport }>>;
   get_recurring(): Promise<Res<{ rules: RecurringRule[] }>>;
   recurring_backfill(data: RecurringInput): Promise<Res<{ count: number }>>;
@@ -50,7 +55,7 @@ interface PyApi {
   mark_reviewed(symbol: string): Promise<Res<{ note: Note | null }>>;
   get_alerts(): Promise<Res<{ alerts: Alerts }>>;
   dismiss_alert(key: string): Promise<Res<{ alerts: Alerts }>>;
-  save_alert_settings(values: Partial<Record<'day_pct' | 'week_pct' | 'watchlist', string | boolean>>): Promise<Res<{ alerts: Alerts }>>;
+  save_alert_settings(values: Partial<Record<'day_pct' | 'week_pct' | 'watchlist' | 'card_days' | 'fx_pct' | 'notify', string | boolean>>): Promise<Res<{ alerts: Alerts }>>;
   refresh(): Promise<Res<object>>;
   export_csv(): Promise<Res<{ path: string }>>;
   backup(): Promise<Res<{ path: string }>>;
@@ -98,6 +103,11 @@ export const api = {
   setTotalBudget: async (amount: string, month: string | null) => (await py()).set_total_budget(amount, month),
   renameCategory: async (id: number, name: string) => (await py()).rename_category(id, name),
   setCategoryParent: async (id: number, parentId: number | null) => (await py()).set_category_parent(id, parentId),
+  addCategory: async (kind: 'income' | 'expense', name: string) => (await py()).add_category(kind, name),
+  setCategoryColor: async (id: number, color: string | null) => (await py()).set_category_color(id, color),
+  setCategoryArchived: async (id: number, archived: boolean) => (await py()).set_category_archived(id, archived),
+  moveCategory: async (id: number, step: number) => (await py()).move_category(id, step),
+  deleteCategory: async (id: number) => (await py()).delete_category(id),
   year: async (year: number | null) => (await py()).get_year(year),
   recurring: async () => (await py()).get_recurring(),
   recurringBackfill: async (data: RecurringInput) => (await py()).recurring_backfill(data),
@@ -123,7 +133,7 @@ export const api = {
   markReviewed: async (symbol: string) => (await py()).mark_reviewed(symbol),
   alerts: async () => (await py()).get_alerts(),
   dismissAlert: async (key: string) => (await py()).dismiss_alert(key),
-  saveAlertSettings: async (values: Partial<Record<'day_pct' | 'week_pct' | 'watchlist', string | boolean>>) =>
+  saveAlertSettings: async (values: Partial<Record<'day_pct' | 'week_pct' | 'watchlist' | 'card_days' | 'fx_pct' | 'notify', string | boolean>>) =>
     (await py()).save_alert_settings(values),
   refresh: async () => (await py()).refresh(),
   exportCsv: async () => (await py()).export_csv(),

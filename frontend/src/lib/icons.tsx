@@ -154,10 +154,23 @@ const ICON_TONES: Partial<Record<keyof typeof PATHS, string>> = {
   card: 'indigo',
 };
 
+/** The tones a category can be given in 管理分類 (finance.CATEGORY_COLORS). The names are slots, not hues:
+ *  each theme has its own set (indigo is orange in 亮色), so the swatches are only numbered. */
+export const CATEGORY_COLORS = ['indigo', 'sky', 'teal', 'plum', 'sand', 'rose', 'ocean', 'stone'];
+
+// The colours picked in 管理分類, by `${kind}:${name}`; App sets them from each state.
+let customTones = new Map<string, string>();
+export function setCategoryColors(cats: { name: string; kind: string; color: string | null }[]) {
+  customTones = new Map(cats.filter(c => c.color).map(c => [`${c.kind}:${c.name}`, c.color!]));
+}
+const customTone = (name: string | null | undefined, kind: string) => (name ? customTones.get(`${kind}:${name}`) : undefined);
+
 /** Solid colour square at the start of a row; brand logos and expenses without a known category use
- *  the brand slate, income the silver-blue, everything else grey. */
-export function IconBadge({ name, tone = 'neutral' }: { name: IconName; tone?: IconTone }) {
-  const hue = tone === 'income' ? 'income' : (ICON_TONES[name as keyof typeof PATHS] ?? (tone === 'expense' ? 'expense' : 'neutral'));
+ *  the brand slate, income the silver-blue, everything else grey. Given its category, a colour picked
+ *  in 管理分類 wins (not over a brand logo). */
+export function IconBadge({ name, tone = 'neutral', category }: { name: IconName; tone?: IconTone; category?: string | null }) {
+  const custom = tone !== 'neutral' && !name.startsWith('brand:') ? customTone(category, tone) : undefined;
+  const hue = custom ?? (tone === 'income' ? 'income' : (ICON_TONES[name as keyof typeof PATHS] ?? (tone === 'expense' ? 'expense' : 'neutral')));
   return (
     <span className={`icon-badge ${tone} solid`} style={{ '--t': `var(--tone-${hue})` } as React.CSSProperties}>
       <Icon name={name} />
@@ -167,7 +180,11 @@ export function IconBadge({ name, tone = 'neutral' }: { name: IconName; tone?: I
 
 /** The same colour for a category name, for tiles and chips that show no icon. */
 export const categoryTone = (name: string | null, kind: string) =>
-  kind === 'income' ? 'var(--tone-income)' : `var(--tone-${ICON_TONES[categoryIcon(name, kind) as keyof typeof PATHS] ?? 'expense'})`;
+  `var(--tone-${customTone(name, kind) ?? autoTone(name, kind)})`;
+
+/** A category's colour from its name (管理分類「自動」). */
+export const autoTone = (name: string | null, kind: string) =>
+  kind === 'income' ? 'income' : (ICON_TONES[categoryIcon(name, kind) as keyof typeof PATHS] ?? 'expense');
 
 const ACCOUNT_ICONS: Record<string, IconName> = {
   broker_tw: 'candles',

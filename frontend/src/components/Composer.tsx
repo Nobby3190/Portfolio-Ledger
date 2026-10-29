@@ -248,7 +248,7 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
   const accounts = state.accounts.filter(a => !a.archived);
   const acctCur = accounts.find(a => a.name === f.account)?.currency;
   const ccy = acctCur && acctCur !== 'TWD' ? acctCur : 'NT$';
-  const cats = state.categories.filter(c => c.kind === (f.kind === 'income' ? 'income' : 'expense'));
+  const cats = state.categories.filter(c => !c.archived && c.kind === (f.kind === 'income' ? 'income' : 'expense'));
   const shownCats = allCats ? cats : cats.slice(0, CHIPS);
   const from = accounts.find(a => a.name === f.account);
   const to = accounts.find(a => a.name === f.to_account);

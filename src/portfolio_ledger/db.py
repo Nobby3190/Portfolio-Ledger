@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 # LEDGER_DATA_DIR points the app at another folder (demo data, testing) instead of the real one.
 APP_DIR = Path(os.environ.get("LEDGER_DATA_DIR") or Path.home() / "Library" / "Application Support" / "帳本 Ledger")
@@ -27,6 +28,8 @@ class Db:
         if path != ":memory:":
             self.conn.execute("PRAGMA journal_mode = WAL")
         self.lock = threading.RLock()
+        self.version = 0  # bumped around every write: caches of what the database holds key on it
+        self.txs: tuple[int, list[Any]] | None = None  # repo.list_txs, at that version
         self._migrate()
 
     def _migrate(self) -> None:
@@ -42,12 +45,15 @@ class Db:
     def write(self) -> Iterator[sqlite3.Connection]:
         """A transaction: commits on success, rolls back on any exception."""
         with self.lock:
+            self.version += 1  # also before: a read inside the transaction already sees its changes
             try:
                 yield self.conn
                 self.conn.commit()
             except BaseException:
                 self.conn.rollback()
                 raise
+            finally:
+                self.version += 1
 
     def query(self, sql: str, params: tuple | dict = ()) -> list[sqlite3.Row]:
         with self.lock:

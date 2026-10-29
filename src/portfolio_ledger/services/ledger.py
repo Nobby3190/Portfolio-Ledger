@@ -118,6 +118,7 @@ class Ledger:
         self._us_misses: dict[str, str] = {}  # symbols Yahoo didn't know, so typing doesn't refetch them
         self.status: dict[str, Any] = {"refreshed_at": None, "errors": [], "running": False}
         self._filled: set[tuple[str, str]] = set()  # 定額 gaps already fetched from Yahoo
+        self._valued: tuple[tuple[int, Date], dict[str, Any]] | None = None  # the last _valuation, by db version
         self._convert_openings()
 
     # ── settings ────────────────────────────────────────────────────────
@@ -301,6 +302,8 @@ class Ledger:
         autopay = str(data.get("autopay") or "").strip() if type_ == "credit" else ""
         if autopay and (acc.statement_day is None or acc.pay_day is None):
             raise EntryError("自動扣繳要先填結帳日和扣款日")
+        if acc_id is not None and old is not None and old.type == "credit" and type_ != "credit":
+            self._drop_autopay(old)  # no longer a card: its autopay would fail every month
         rules = self._renamed_rules({acc.id: name}) if acc.id is not None else []
         saved = repo.save_account(self.db, acc)
         for r in rules:  # rules naming the old @帳戶 keep working
@@ -339,6 +342,10 @@ class Ledger:
                 out[a.id or 0] = found[1]
         return out
 
+    def _drop_autopay(self, card: Account) -> None:
+        if found := self._autopay_rule(card):
+            repo.delete_recurring(self.db, found[0].id or 0)
+
     def _next_pay_date(self, card: Account) -> str:
         """The first 扣款日 after today: the bill already due today or earlier is not the rule's to pay."""
         assert card.pay_day is not None
@@ -352,11 +359,10 @@ class Ledger:
 
     def _save_autopay(self, card: Account, payer: str) -> None:
         """Create, update or remove the card's autopay rule to match the account form."""
-        found = self._autopay_rule(card)
         if not payer:
-            if found:
-                repo.delete_recurring(self.db, found[0].id or 0)
+            self._drop_autopay(card)
             return
+        found = self._autopay_rule(card)
         line = recurring._plain_line(self, format_command("repay", account=card.name, to_account=payer, note="卡費 自動扣繳"))
         if found is None:
             repo.save_recurring(self.db, Recurring(None, line, "monthly", self._next_pay_date(card)))
@@ -376,6 +382,9 @@ class Ledger:
     def delete_account(self, account_id: int) -> None:
         if repo.account_tx_count(self.db, account_id):
             raise EntryError("帳戶裡還有交易，不能刪除（可以封存）")
+        acc = repo.get_account(self.db, account_id)
+        if acc is not None and acc.type == "credit":
+            self._drop_autopay(acc)
         repo.delete_account(self.db, account_id)
 
     # ── securities ──────────────────────────────────────────────────────
@@ -489,13 +498,13 @@ class Ledger:
 
     def _resolve_category(self, name: str | None, kind: str) -> tuple[Category | None, str]:
         """(existing category, display name); a None category means it is created on commit."""
-        cats = [c for c in repo.list_categories(self.db, kind) if not c.archived]
+        cats = repo.list_categories(self.db, kind)
         if not name:
             name = "其他" if kind == "expense" else "其他收入"
-        exact = [c for c in cats if c.name == name]
+        exact = [c for c in cats if c.name == name]  # an archived one too: its full name still files under it
         if exact:
             return exact[0], name
-        partial = [c for c in cats if name in c.name]
+        partial = [c for c in cats if name in c.name and not c.archived]
         if len(partial) == 1:
             return partial[0], partial[0].name
         return None, name
@@ -750,7 +759,7 @@ class Ledger:
                           category_id=cat.id if cat else None, transfer_group=group, note=cmd.note))  # fmt: skip
         return Draft(
             txs, payer, to_account=loan, category=cat_name, new_category=None if cat or not interest else cat_name,
-            repay={"principal": principal, "interest": interest, "owed": owed},
+            repay={"principal": principal, "interest": interest, "owed": owed, "over": amount - interest - principal},
         )
 
     # ── credit cards ──
@@ -980,6 +989,8 @@ class Ledger:
             r = d.repay
             parts += [f"本金 {fmt.money(r['principal'], cur)}", f"利息 {fmt.money(r['interest'], cur)}",
                       f"還完剩 {fmt.money(r['owed'] - r['principal'], cur)}", d.account.name]  # fmt: skip
+            if r["over"] > 0:
+                parts.insert(3, f"超過欠款 {fmt.money(r['over'], cur)} 不記")
             if t.date != self.today().isoformat():
                 parts.append(t.date)
             if t.note:
@@ -1277,6 +1288,14 @@ class Ledger:
             return self._state()
 
     def _valuation(self) -> dict[str, Any]:
+        """Every holding and account valued today; reused until the database changes (one save makes the
+        page, the plan, the alerts... each ask for it). Callers only read it."""
+        key = (self.db.version, self.today())
+        if self._valued is None or self._valued[0] != key:
+            self._valued = (key, self._compute_valuation())
+        return self._valued[1]
+
+    def _compute_valuation(self) -> dict[str, Any]:
         accounts = repo.list_accounts(self.db, True)
         acc_by_id = {a.id: a for a in accounts}
         txs = repo.list_txs(self.db)
@@ -1743,18 +1762,18 @@ class Ledger:
         }
 
     def _categories(self, txs: list[Tx]) -> list[dict[str, Any]]:
-        """Income/expense categories, most used in the last 90 days first (the composer's chips)."""
+        """Income/expense categories, most used in the last 90 days first (the composer's chips), archived last."""
         since = (self.today() - timedelta(days=90)).isoformat()
         uses: dict[int, int] = {}
         for t in txs:
             if t.category_id and t.date >= since:
                 uses[t.category_id] = uses.get(t.category_id, 0) + 1
-        cats = [c for c in repo.list_categories(self.db) if not c.archived]
-        cats.sort(key=lambda c: (-uses.get(c.id or 0, 0), c.sort, c.id or 0))
+        cats = repo.list_categories(self.db)  # archived too, for 管理分類 and the search filter
+        cats.sort(key=lambda c: (c.archived, -uses.get(c.id or 0, 0), c.sort, c.id or 0))
         count = repo.category_use_counts(self.db)  # all time, for 管理分類
         return [
             {"id": c.id, "name": c.name, "kind": c.kind, "uses": uses.get(c.id or 0, 0), "parent_id": c.parent_id,
-             "sort": c.sort, "count": count.get(c.id or 0, 0)}
+             "sort": c.sort, "count": count.get(c.id or 0, 0), "color": c.color, "archived": c.archived}
             for c in cats
         ]  # fmt: skip
 
@@ -2024,15 +2043,16 @@ class Ledger:
     def export_csv(self, dest: Path) -> Path:
         accounts = {a.id: a for a in repo.list_accounts(self.db, True)}
         secs = repo.securities(self.db, {t.symbol for t in repo.list_txs(self.db) if t.symbol})
+        cats = {c.id: c.name for c in repo.list_categories(self.db)}
         with dest.open("w", newline="", encoding="utf-8-sig") as f:  # BOM so Excel reads Chinese
             w = csv.writer(f)
-            w.writerow(["日期", "帳戶", "幣別", "類型", "代號", "名稱", "股數", "價格", "手續費", "稅", "金額", "匯率", "備註"])
+            w.writerow(["日期", "帳戶", "幣別", "類型", "分類", "代號", "名稱", "股數", "價格", "手續費", "稅", "金額", "匯率", "備註"])
             for t in repo.list_txs(self.db):
                 a = accounts.get(t.account_id)
                 s = secs.get(t.symbol) if t.symbol else None
                 w.writerow([
                     t.date, a.name if a else "", a.currency if a else "", TX_KINDS.get(t.kind, t.kind),
-                    t.symbol or "", s.name if s else "", t.qty if t.qty is not None else "",
+                    cats.get(t.category_id, "") if t.category_id else "", t.symbol or "", s.name if s else "", t.qty if t.qty is not None else "",
                     t.price if t.price is not None else "", t.fee, t.tax, t.amount,
                     t.fx_rate if t.fx_rate is not None else "", t.note,
                 ])  # fmt: skip

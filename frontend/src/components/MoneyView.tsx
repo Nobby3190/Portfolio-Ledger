@@ -289,7 +289,7 @@ function MonthView({
                   <div key={c.id} className={`trow ${pieHover === i ? 'on' : ''}`} onPointerEnter={() => setPieHover(i)}>
                     <span className="cell-ic">
                       <i className="cat-dot" style={{ background: categoryTone(c.name, 'expense') }} aria-hidden />
-                      <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
+                      <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" category={c.name} />
                       <span className="ellipsis">{c.name}</span>
                     </span>
                     <Money className="num r" value={c.spent} />
@@ -309,7 +309,7 @@ function MonthView({
               return (
                 <div key={c.id} className={`cat-tile ${st} ${open ? 'open' : ''}`} style={{ '--t': categoryTone(c.name, 'expense') } as React.CSSProperties}>
                   <span className="cat-tile-top">
-                    <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" />
+                    <IconBadge name={categoryIcon(c.name, 'expense')} tone="expense" category={c.name} />
                     {!m.is_future && <span className="num muted small">{Math.round(c.share * 100)}%</span>}
                   </span>
                   <span className="cat-tile-name ellipsis">{c.name}</span>
@@ -385,7 +385,7 @@ function MonthView({
             {m.income_categories.map(c => (
               <div key={c.name} className="trow">
                 <span className="cell-ic">
-                  <IconBadge name={categoryIcon(c.name, 'income')} tone="income" />
+                  <IconBadge name={categoryIcon(c.name, 'income')} tone="income" category={c.name} />
                   <span className="ellipsis">{c.name}</span>
                 </span>
                 <span className="cell r">
@@ -488,7 +488,7 @@ function Upcoming({ state, onOpen }: { state: State; onOpen(): void }) {
               <b className="num">{Number(r.next_date!.slice(8))}</b>
             </span>
             <span className="cell-ic">
-              <IconBadge name={txIcon(r.kind, r.category, r.line)} tone={toneOf(r.kind)} />
+              <IconBadge name={txIcon(r.kind, r.category, r.line)} tone={toneOf(r.kind)} category={r.category} />
               <span className="ellipsis">{r.title}</span>
             </span>
             <span className="cell r">{r.amount ? <Money className="num" value={r.amount} /> : <span className="muted small">月付</span>}</span>

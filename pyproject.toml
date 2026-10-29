@@ -1,6 +1,6 @@
 [project]
 name = "portfolio-ledger"
-version = "2.2.0"
+version = "2.3.0"
 description = "把投資和記帳放在同一本帳裡的 Mac 桌面 app"
 readme = "README.md"
 authors = [
@@ -11,6 +11,7 @@ dependencies = [
     "certifi>=2026.7.22",
     "httpx>=0.28.1",
     "pyobjc-framework-localauthentication>=12.2.2 ; sys_platform == 'darwin'",
+    "pyobjc-framework-usernotifications>=12.2.2 ; sys_platform == 'darwin'",
     "pywebview>=6.2.1",
 ]
 

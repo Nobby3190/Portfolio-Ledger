@@ -85,7 +85,7 @@ export function LifePlans({ plan, state, onPlan, className = '' }: { plan: Plan;
         <LifePlanForm
           key={editing.id ?? 'new'}
           initial={editing}
-          accounts={state.accounts.filter(a => !a.archived)}
+          accounts={state.accounts.filter(a => !a.archived || editing.account_ids.includes(a.id))} // a ticked archived one can still be unticked
           error={formError}
           saving={saving}
           onCancel={() => setEditing(null)}
@@ -107,7 +107,8 @@ function PlanRow({ p, withLoan, onEdit }: { p: LifePlan; withLoan: boolean; onEd
         <span className="sub ellipsis">
           {p.target_month ? ym(p.target_month) : '沒有期限'}
           {'・'}
-          {p.scope === 'accounts' ? p.accounts.join('、') : p.scope_label}
+          {/* accounts that were deleted since drop out; then say the scope */}
+          {p.scope === 'accounts' && p.accounts.length ? p.accounts.join('、') : p.scope_label}
           {p.active && '・納入試算'}
         </span>
       </span>
