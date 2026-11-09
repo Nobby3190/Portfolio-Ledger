@@ -6,7 +6,7 @@ import calendar
 import json
 import unicodedata
 from datetime import date as Date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 from .. import repo
@@ -32,13 +32,15 @@ def _twd(t: Tx) -> Decimal:
     return abs(t.amount) * (t.fx_rate if t.fx_rate is not None else Decimal(1))
 
 
-def _flows(txs: list[Tx]) -> dict[str, dict[str, dict[int | None, Decimal]]]:
-    """month -> kind (income/expense) -> category id -> TWD."""
+def _flows(lg: Ledger) -> dict[str, dict[str, dict[int | None, Decimal]]]:
+    """month -> kind (income/expense) -> category id -> TWD. The month is the bill's for card charges
+    when the setting says so (Ledger.statement_days)."""
+    days = lg.statement_days()
     out: dict[str, dict[str, dict[int | None, Decimal]]] = {}
-    for t in txs:
+    for t in repo.list_txs(lg.db):
         if t.kind not in ("income", "expense"):
             continue
-        cats = out.setdefault(t.date[:7], {"income": {}, "expense": {}})[t.kind]
+        cats = out.setdefault(lg.flow_month(t, days), {"income": {}, "expense": {}})[t.kind]
         cats[t.category_id] = cats.get(t.category_id, ZERO) + _twd(t)
     return out
 
@@ -77,9 +79,10 @@ def month_report(lg: Ledger, month: str | None = None) -> dict[str, Any]:
     latest = max(f"{today.year}-12", shift_month(this_month, 1))
     if month > latest:
         raise FinanceError(f"最遠只能看到 {latest[:4]} 年 {int(latest[5:])} 月")
-    future = month > this_month
-    flows = _flows(repo.list_txs(lg.db))
+    flows = _flows(lg)
     income, expense = _sum(flows, month, "income"), _sum(flows, month, "expense")
+    # A month still to come shows its budget, unless a card charge already counts in it (by bill month).
+    future = month > this_month and not (income or expense)
     net = income - expense
     prev = shift_month(month, -1)
 
@@ -143,7 +146,7 @@ def month_report(lg: Ledger, month: str | None = None) -> dict[str, Any]:
     def point(m: str) -> dict[str, Any]:
         inc, exp = _sum(flows, m, "income"), _sum(flows, m, "expense")
         return {"month": m, "label": f"{int(m[5:])} 月", "income": float(inc), "expense": float(exp),
-                "income_s": fmt.money(inc), "expense_s": fmt.money(exp), "future": m > this_month}  # fmt: skip
+                "income_s": fmt.money(inc), "expense_s": fmt.money(exp), "future": m > this_month and not (inc or exp)}  # fmt: skip
 
     # The chart never runs into the future; the tabs add the months still to come this year.
     anchor = min(month, this_month)
@@ -191,7 +194,7 @@ def year_report(lg: Ledger, year: str | int | None = None) -> dict[str, Any]:
         raise FinanceError("年份要是數字") from None
     if not 1900 <= y <= today.year:
         raise FinanceError(f"只能看到 {today.year} 年")
-    flows = _flows(repo.list_txs(lg.db))
+    flows = _flows(lg)
     this_month = today.isoformat()[:7]
 
     elapsed = today.month if y == today.year else 12  # months the averages are over
@@ -450,7 +453,7 @@ def _amount(v: object, label: str) -> Decimal | None:
         s, scale = s[:-1], Decimal(10000)
     try:
         d = Decimal(s) * scale
-    except Exception:
+    except InvalidOperation:
         raise FinanceError(f"{label}要是數字") from None
     if not d.is_finite() or d < 0:
         raise FinanceError(f"{label}不能是負數")
@@ -463,7 +466,7 @@ def _amount(v: object, label: str) -> Decimal | None:
 def _averages(lg: Ledger) -> dict[str, Any]:
     """Monthly averages over the months that have data: net savings and income over the last 6,
     spending over the last 12."""
-    flows = _flows(repo.list_txs(lg.db))
+    flows = _flows(lg)
     this_month = lg.today().isoformat()[:7]
     months6 = [m for m in (shift_month(this_month, -i) for i in range(6)) if m in flows]
     months12 = [m for m in (shift_month(this_month, -i) for i in range(12)) if m in flows]
@@ -851,7 +854,7 @@ def dividend_report(lg: Ledger) -> dict[str, Any]:
             {"symbol": k, "name": names.get(k, k), "amount": fmt.money(x), "ratio": float(x / s.ttm) if s.ttm else 0.0,
              "held": k in held}
             for k, x in s.by_symbol
-        ],  # fmt: skip
+        ],
         "upcoming": upcoming,
     }
 

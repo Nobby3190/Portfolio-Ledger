@@ -158,7 +158,7 @@ def check_cards(cards: list[CardTarget], today: Date, settings: dict[str, Any] |
     days = int((settings or {}).get("card_days", DEFAULTS["card_days"]))
     out: list[dict[str, Any]] = []
     for c in cards:
-        m = lambda d: {"m": fmt.money(d, c.currency) or "0"}  # noqa: E731
+        m = lambda d, cur=c.currency: {"m": fmt.money(d, cur) or "0"}
         # the bill closed and is still owed: 出帳 until the 預告 takes over
         if c.statement < today.isoformat() and c.due > 0:
             if (Date.fromisoformat(c.pay_date) - today).days > days:

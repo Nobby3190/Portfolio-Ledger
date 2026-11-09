@@ -45,7 +45,7 @@ def review_due(n: Note) -> str | None:
 def note_view(n: Note | None) -> dict[str, Any] | None:
     if n is None:
         return None
-    plain = lambda d: "" if d is None else format(d.normalize(), "f")  # noqa: E731
+    plain = lambda d: "" if d is None else format(d.normalize(), "f")
     return {
         "symbol": n.symbol,
         "thesis": n.thesis,
@@ -59,7 +59,7 @@ def note_view(n: Note | None) -> dict[str, Any] | None:
         "input": {
             "symbol": n.symbol, "thesis": n.thesis, "red_lines": n.red_lines, "band_low": plain(n.band_low),
             "band_high": plain(n.band_high), "review_months": str(n.review_months or ""), "last_review": n.last_review or "",
-        },  # fmt: skip
+        },
     }
 
 

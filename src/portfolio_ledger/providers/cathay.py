@@ -30,7 +30,7 @@ class BoardRate:
 
 
 def _text(page: str) -> str:
-    page = re.sub(r"<script.*?</script>|<style.*?</style>", "", page, flags=re.S)
+    page = re.sub(r"<script.*?</script>|<style.*?</style>", "", page, flags=re.DOTALL)
     page = html_lib.unescape(re.sub(r"<[^>]+>", "|", page))
     page = re.sub(r"\s+", " ", page)
     return re.sub(r"\|[\s|]*\|", "|", page)

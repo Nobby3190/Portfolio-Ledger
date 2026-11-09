@@ -61,7 +61,11 @@ def watch_lock(on_lock: Callable[[], None]) -> None:
     main (Cocoa) thread and must not block."""
     global _observer
     try:
-        from AppKit import NSWorkspace, NSWorkspaceScreensDidSleepNotification, NSWorkspaceWillSleepNotification
+        from AppKit import (
+            NSWorkspace,
+            NSWorkspaceScreensDidSleepNotification,
+            NSWorkspaceWillSleepNotification,
+        )
         from Foundation import NSDistributedNotificationCenter, NSObject
     except ImportError:
         return

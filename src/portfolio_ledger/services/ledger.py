@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date as Date
 from datetime import datetime, time, timedelta
-from decimal import ROUND_FLOOR, Decimal
+from decimal import ROUND_FLOOR, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -25,12 +25,29 @@ import httpx
 
 from .. import repo
 from ..db import Db
-from ..models import ACCOUNT_TYPES, RECURRING_FREQS, SPENDING_TYPES, TX_KINDS, Account, Category, Recurring, Security, Tx
+from ..models import (
+    ACCOUNT_TYPES,
+    RECURRING_FREQS,
+    SPENDING_TYPES,
+    TX_KINDS,
+    Account,
+    Category,
+    Recurring,
+    Security,
+    Tx,
+)
 from ..providers import cathay, finmind, twse, yahoo
 from ..providers.base import ProviderError, make_client
 from . import dividends, fees, fmt, planner, recurring
 from .portfolio import Book, PortfolioError, replay
-from .quick import CATEGORY_KINDS, FIELD_NAMES, Command, ParseError, format_command, parse
+from .quick import (
+    CATEGORY_KINDS,
+    FIELD_NAMES,
+    Command,
+    ParseError,
+    format_command,
+    parse,
+)
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 TW_CODE = re.compile(r"^\d{4,6}[A-Z]?$")
@@ -133,6 +150,8 @@ class Ledger:
             "up_color": repo.get_setting(self.db, "up_color", "red"),  # Taiwan: red is up
             # Foreign cash valuation: 'cathay' = 國泰世華 即期買進 (like the 國泰 app), 'market' = Yahoo mid-rate.
             "fx_source": repo.get_setting(self.db, "fx_source", "market"),
+            # 收支 month of a credit card charge: 'statement' = the bill it lands in (default), 'date' = the day it was made.
+            "card_month": repo.get_setting(self.db, "card_month", "statement"),
         }
 
     def save_settings(self, values: dict[str, str]) -> None:
@@ -140,7 +159,8 @@ class Ledger:
             if key in values:
                 d = _positive(values[key], "手續費折扣" if key == "fee_discount" else "最低手續費", allow_zero=True)
                 repo.set_setting(self.db, key, str(d))
-        for key, allowed in (("privacy_lock", {"0", "1"}), ("up_color", {"red", "green"}), ("fx_source", {"cathay", "market"})):
+        for key, allowed in (("privacy_lock", {"0", "1"}), ("up_color", {"red", "green"}), ("fx_source", {"cathay", "market"}),
+                             ("card_month", {"date", "statement"})):  # fmt: skip
             if key in values:
                 if values[key] not in allowed:
                     raise EntryError(f"{key} 的值不正確")
@@ -763,6 +783,19 @@ class Ledger:
         )
 
     # ── credit cards ──
+
+    def statement_days(self) -> dict[int, int]:
+        """Card account id -> 結帳日, when 收支 counts card charges by bill month (the default); empty when by date."""
+        if repo.get_setting(self.db, "card_month", "statement") != "statement":
+            return {}
+        return {a.id: a.statement_day for a in repo.list_accounts(self.db, include_archived=True)
+                if a.type == "credit" and a.id is not None and a.statement_day}  # fmt: skip
+
+    @staticmethod
+    def flow_month(t: Tx, days: dict[int, int]) -> str:
+        """The 收支 month a transaction counts in (see statement_days)."""
+        sd = days.get(t.account_id)
+        return planner.statement_month(t.date, sd) if sd else t.date[:7]
 
     @staticmethod
     def _statement_date(card: Account, day: str) -> str:
@@ -1516,7 +1549,20 @@ class Ledger:
         Ratios are shares of everything positive, so every bar in the card uses the same scale.
         """
         invest, cash = self._asset_classes(v)
-        debts = {k: x for k, x in cash.items() if x < 0}
+        # Cards one by one (not the lumped 信用卡 label), so a payment shows on its own card.
+        debts = [(k, x, None) for k, x in sorted(cash.items()) if x < 0 and k != "信用卡"]
+        card_debts = []
+        today = self.today().isoformat()
+        for a, bal, _held in v["accounts"]:
+            if a.type != "credit" or bal >= 0:
+                continue
+            fx = v["rate"](a.currency) or ZERO
+            split = None
+            if a.statement_day:
+                billed = min(self._card_due(a, today, set())["due"], -bal)
+                split = (-billed * fx, (bal + billed) * fx)  # 待繳 (billed, unpaid), 未出帳
+            card_debts.append((a.name, bal * fx, split))
+        debts = sorted(card_debts) + debts
         cash = {k: x for k, x in cash.items() if x > 0}
         invest = {k: x for k, x in invest.items() if x > 0}
         positive = sum(invest.values(), ZERO) + sum(cash.values(), ZERO)
@@ -1537,8 +1583,11 @@ class Ledger:
 
         return {
             "groups": [g for g in (group("invest", "投資", invest), group("cash", "現金與存款", cash)) if g["items"]],
-            "debts": [{"label": f"{k}欠款" if k == "信用卡" else k, "value": fmt.money(x)} for k, x in sorted(debts.items())],
-            "debt_total": fmt.money(sum(debts.values(), ZERO)) if debts else None,
+            "debts": [
+                {"label": k, "value": fmt.money(x)} | ({"billed": fmt.money(sp[0]), "unbilled": fmt.money(sp[1])} if sp else {})
+                for k, x, sp in debts
+            ],
+            "debt_total": fmt.money(sum((x for _, x, _ in debts), ZERO)) if debts else None,
         }
 
     def _allocation(self, v: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1622,6 +1671,7 @@ class Ledger:
             if t.transfer_group:
                 legs.setdefault(t.transfer_group, []).append(t)
         repays = {g: r for g, rows in legs.items() if any(x.kind == "expense" for x in rows) and (r := self._repay_parts(rows))}
+        days = self.statement_days()
         txs = []
         for t in reversed(v["txs"]):
             acc = acc_by_id.get(t.account_id)
@@ -1638,7 +1688,7 @@ class Ledger:
                     {
                         "category": None, "to_account": loan.name, "received": None,
                         "twd": fmt.money(paid * (t.fx_rate or Decimal(1))), "value": float(paid * (t.fx_rate or Decimal(1))),
-                        "id": t.id, "date": t.date, "kind": "repay", "label": TX_KINDS["repay"], "symbol": None,
+                        "id": t.id, "date": t.date, "month": t.date[:7], "kind": "repay", "label": TX_KINDS["repay"], "symbol": None,
                         "name": None, "qty": None, "ratio": None, "price": None,
                         "amount": fmt.money(-paid, cur, signed=True), "sign": -1, "currency": cur,
                         "account": payer.name, "note": note, "recurring": t.recurring_id is not None,
@@ -1662,6 +1712,7 @@ class Ledger:
                     "twd": fmt.money(abs(t.amount) * (t.fx_rate or Decimal(1))) if t.kind in CATEGORY_KINDS else None,
                     "id": t.id,
                     "date": t.date,
+                    "month": self.flow_month(t, days),
                     "kind": t.kind,
                     "label": ("期初欠款" if t.balance < 0 else "期初餘額") if t.balance is not None else TX_KINDS.get(t.kind, t.kind),
                     "symbol": t.symbol,
@@ -2079,7 +2130,7 @@ def _annual(rate: float | None) -> str | None:
 def _positive(v: object, label: str, allow_zero: bool = False) -> Decimal:
     try:
         d = Decimal(str(v).strip())
-    except Exception:
+    except InvalidOperation:
         raise EntryError(f"{label}要是數字") from None
     if not d.is_finite() or d < 0 or (d == 0 and not allow_zero):
         raise EntryError(f"{label}要是正數")

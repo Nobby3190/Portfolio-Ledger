@@ -846,6 +846,13 @@ export function SettingsPanel({ state, onState, onClose }: { state: State; onSta
           <small className="muted">銀行買進價是現在把外幣換回台幣實際拿到的價格；換外幣時沒填匯率，會用國泰的即期賣出價</small>
         </label>
         <label className="check">
+          <input type="checkbox" checked={s.card_month === 'statement'} onChange={e => save({ card_month: e.target.checked ? 'statement' : 'date' })} />
+          信用卡支出依帳單月份計
+          <HelpTip label="帳單月份說明">
+            有設結帳日的信用卡，結帳日之後刷的算進下個月的收支和預算（例如結帳日 29 號，10/30 刷的算 11 月）。交易日期照實記，帳單金額、帳戶餘額不受影響。沒設結帳日的卡照刷卡日算。
+          </HelpTip>
+        </label>
+        <label className="check">
           <input type="checkbox" checked={s.privacy_lock !== '0'} onChange={e => save({ privacy_lock: e.target.checked ? '1' : '0' })} />
           開啟時隱藏金額
           <HelpTip label="隱藏金額說明">

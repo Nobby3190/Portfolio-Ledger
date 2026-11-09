@@ -384,8 +384,17 @@ export function AllocationCard({ state, className = '' }: { state: State; classN
                     <i aria-hidden />
                     {d.label}
                   </span>
-                  <span />
-                  <span />
+                  {d.billed !== undefined ? (
+                    <span className="alloc-debt-split muted">
+                      {amount(d.billed) === 0 ? '本期已繳清' : <>待繳 <Money className="num" value={d.billed} /></>}
+                      {amount(d.unbilled ?? '0') !== 0 && <> · 未出帳 <Money className="num" value={d.unbilled} /></>}
+                    </span>
+                  ) : (
+                    <>
+                      <span />
+                      <span />
+                    </>
+                  )}
                   <Money className="num alloc-val" value={d.value} />
                 </div>
               ))}

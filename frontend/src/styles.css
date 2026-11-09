@@ -2550,6 +2550,14 @@ button.trow:hover {
   color: var(--warn);
 }
 
+.alloc-debt-split {
+  grid-column: 2 / 4;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ── 健檢 ─────────────────────────────────────────────────── */
 /* Levels never use red/green (those mean up/down): warn = amber, note = brand blue, ok = grey. */
 

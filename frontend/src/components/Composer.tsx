@@ -221,7 +221,7 @@ export function Composer({ state, open, onClose, onSaved }: Props) {
     const r = await api.commit(line, open.editId, canRepeat && repeat ? 'monthly' : null);
     setBusy(false);
     if (!r.ok) return setError(r.error);
-    const month = f.date.slice(0, 7);
+    const month = flowMonth(state, f);
     const where = !quick.trim() && month !== state.today.slice(0, 7) ? `（記在 ${Number(month.slice(5))} 月，到「收支」切換月份查看）` : '';
     const day = Number(f.date.slice(8));
     if (r.posted !== undefined) {
@@ -723,6 +723,16 @@ function PreviewText({ preview }: { preview: Preview }) {
         </>
       );
   }
+}
+
+/** The 收支 month the entry counts in: a card charge after the 結帳日 is next month's when the setting says so. */
+function flowMonth(state: State, f: TxFields): string {
+  const month = f.date.slice(0, 7);
+  const card = state.accounts.find(a => a.name === f.account && a.type === 'credit');
+  const sd = state.settings.card_month === 'statement' && (f.kind === 'expense' || f.kind === 'income') ? card?.statement_day : null;
+  if (!sd) return month;
+  const [y, m, d] = f.date.split('-').map(Number);
+  return d <= Math.min(sd, new Date(y, m, 0).getDate()) ? month : nextMonth(`${month}-01`).slice(0, 7);
 }
 
 /** The same day next month (the 31st falls on a shorter month's last day), as yyyy-mm-dd. */

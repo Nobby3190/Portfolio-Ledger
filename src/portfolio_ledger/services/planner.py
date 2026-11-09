@@ -5,6 +5,7 @@ Projections use floats: they are estimates over decades, not ledger amounts.
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
 from datetime import date as Date
 
@@ -171,6 +172,13 @@ def shift_month(month: str, n: int) -> str:
     y += (m - 1) // 12
     m = (m - 1) % 12 + 1
     return f"{y:04d}-{m:02d}"
+
+
+def statement_month(day: str, statement_day: int) -> str:
+    """The YYYY-MM of the bill a card charge on `day` lands in: after the 結帳日 it is next month's
+    (a 31st falls on a shorter month's last day)."""
+    y, m, d = int(day[:4]), int(day[5:7]), int(day[8:10])
+    return day[:7] if d <= min(statement_day, calendar.monthrange(y, m)[1]) else shift_month(day[:7], 1)
 
 
 def months_between(start: Date, end: Date) -> int:

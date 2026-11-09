@@ -51,6 +51,7 @@ export interface Closed {
 export interface TxRow {
   id: number;
   date: string;
+  month: string; // the 收支 month it counts in: a card charge after the 結帳日 can be next month's
   kind: string;
   label: string;
   symbol: string | null;
@@ -144,6 +145,7 @@ export interface Settings {
   privacy_lock: '0' | '1'; // open with the amounts hidden; showing them takes Touch ID or the password
   up_color: 'red' | 'green';
   fx_source: 'cathay' | 'market';
+  card_month: 'date' | 'statement'; // 收支 counts card charges by the day made, or by the bill they land in
 }
 
 export interface State {
@@ -158,7 +160,7 @@ export interface State {
   allocation: { label: string; value: string; ratio: number }[];
   allocation_groups: {
     groups: { key: 'invest' | 'cash'; label: string; value: string; ratio: number; items: { label: string; value: string; ratio: number }[] }[];
-    debts: { label: string; value: string }[];
+    debts: { label: string; value: string; billed?: string; unbilled?: string }[]; // billed/unbilled: cards with a 結帳日
     debt_total: string | null;
   };
   history: { date: string; total: string; holdings: string | null }[]; // holdings: null where an old snapshot can't tell

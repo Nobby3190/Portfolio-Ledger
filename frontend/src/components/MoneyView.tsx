@@ -106,7 +106,7 @@ function MonthView({
   if (error) return <p className="message bad">{error}</p>;
   if (!report) return null;
   const m = report;
-  const rows = state.transactions.filter(t => t.date.startsWith(m.month) && FLOW_KINDS.includes(t.kind));
+  const rows = state.transactions.filter(t => t.month === m.month && FLOW_KINDS.includes(t.kind));
   // A month still to come lists every category, so budgets can be set ahead.
   const cats = m.is_future ? m.categories : m.categories.filter(c => c.spent !== '0' || c.budget);
   const unused = m.categories.filter(c => c.spent === '0' && !c.budget).map(c => c.name);
